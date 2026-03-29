@@ -210,7 +210,6 @@ dependencies = [
  "bytes",
  "dotenv",
  "reqwest",
- "rkyv",
  "rustls",
  "shared",
  "thiserror 2.0.18",

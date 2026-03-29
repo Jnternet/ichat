@@ -14,5 +14,5 @@ tokio-rustls = "0.26.4"
 webpki-roots = "1.0.6"
 
 shared = { path = "../shared" }
-rkyv = "0.8.15"
+# rkyv = "0.8.15"
 reqwest = "0.13.2"
