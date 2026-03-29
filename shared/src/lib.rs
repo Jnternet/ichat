@@ -21,3 +21,7 @@ impl Test {
         }
     }
 }
+
+pub struct Login {
+    user_name: String,
+}

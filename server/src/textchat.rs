@@ -8,7 +8,7 @@ use tokio::net::TcpListener;
 use tokio_rustls::{TlsAcceptor, TlsStream};
 
 pub async fn run() -> anyhow::Result<()> {
-    let server_addr = std::env::var("SERVER_SOCK_ADDR")?;
+    let server_addr = std::env::var("SERVER_TEXTCHAT_ADDR")?;
     let listener = TcpListener::bind(server_addr).await?;
 
     let tls_acceptor = get_acceptor().await?;
