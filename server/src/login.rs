@@ -42,6 +42,10 @@ async fn login(Json(login): Json<Login>) -> Result<impl IntoResponse, LoginError
             auth: "123".to_string(),
         }));
     }
+
+    if login.user_name == correct.user_name {
+        return Err(LoginError::WrongPassword);
+    }
     Err(LoginError::NotExist)
 }
 

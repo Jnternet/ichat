@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     let url = format!("https://{}/login", server_name);
     let login_example = Login {
         user_name: "123".to_string(),
-        password: "123".to_string(),
+        password: "1232".to_string(),
     };
     let res = login(&client, &url, &login_example).await;
     dbg!(&res);
