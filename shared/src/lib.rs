@@ -1,6 +1,10 @@
 pub use rkyv;
-use rkyv::{Archive, Deserialize, Serialize};
+pub use serde;
+pub use serde_json;
 
+pub mod login;
+
+use rkyv::{Archive, Deserialize, Serialize};
 #[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]
 #[rkyv(
     // This will generate a PartialEq impl between our unarchived
@@ -21,8 +25,4 @@ impl Test {
             option: None,
         }
     }
-}
-
-pub struct Login {
-    user_name: String,
 }

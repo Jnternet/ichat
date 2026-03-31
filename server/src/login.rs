@@ -1,8 +1,10 @@
 use axum::{
-    Router,
+    Json, Router,
+    response::IntoResponse,
     routing::{get, post},
 };
 use axum_server::tls_rustls::RustlsConfig;
+use shared::login::*;
 use std::net::SocketAddr;
 
 pub async fn run() -> anyhow::Result<()> {
@@ -28,7 +30,45 @@ pub async fn run() -> anyhow::Result<()> {
 
     Ok(())
 }
-// use shared::rkyv;
-async fn login() {
-    todo!()
+
+#[axum::debug_handler]
+async fn login(Json(login): Json<Login>) -> Result<impl IntoResponse, LoginError> {
+    let correct = Login {
+        user_name: "123".to_string(),
+        password: "123".to_string(),
+    };
+    if login.user_name == correct.user_name && login.password == correct.password {
+        return Ok(Json(LoginSuccess {
+            auth: "123".to_string(),
+        }));
+    }
+    Err(LoginError::NotExist)
+}
+
+#[derive(Debug, thiserror::Error)]
+enum LoginError {
+    #[error("this account does not exist")]
+    NotExist,
+    #[error("WrongPassword")]
+    WrongPassword,
+    // #[error("Internal Error: {0}")]
+    // Internal(#[from] anyhow::Error),
+}
+use axum::http::StatusCode;
+impl IntoResponse for LoginError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            LoginError::NotExist => (
+                StatusCode::NOT_FOUND,
+                Json(shared::login::LoginError::NotExist),
+            )
+                .into_response(),
+
+            LoginError::WrongPassword => (
+                StatusCode::NOT_FOUND,
+                Json(shared::login::LoginError::WrongPassword),
+            )
+                .into_response(),
+        }
+    }
 }
