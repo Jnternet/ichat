@@ -1,9 +1,12 @@
 use axum::{Json, Router, response::IntoResponse, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
+use sea_orm::Database;
 use shared::register::{Register, RegisterSuccess};
 use std::net::SocketAddr;
 
 pub async fn run() -> anyhow::Result<()> {
+    let server_db_url = std::env::var("SERVER_DATABASE")?;
+    let db = Database::connect(server_db_url).await?;
     // 你的路由
     let app = Router::new().route(r"/register", post(register));
 
