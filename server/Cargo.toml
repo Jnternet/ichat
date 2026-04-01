@@ -17,3 +17,5 @@ tokio-rustls = "0.26.4"
 axum = { version = "0.8.8", features = ["json", "macros"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 sea-orm = { version = "2.0.0-rc", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
+uuid = { version = "1.23.0", features = ["v4"] }
+chrono = "0.4.44"

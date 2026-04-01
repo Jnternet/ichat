@@ -1,10 +1,14 @@
 use anyhow::bail;
 use reqwest::Client;
+use rustls::crypto::aws_lc_rs;
 use shared::register::*;
 use shared::serde_json;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
+    aws_lc_rs::default_provider()
+        .install_default()
+        .expect("unable to set aws_lc_rs as provider");
 
     let root_cert_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());

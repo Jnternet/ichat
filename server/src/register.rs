@@ -1,15 +1,26 @@
+use crate::entity::{accounts, prelude::*};
+use axum::extract::State;
+use axum::http::StatusCode;
 use axum::{Json, Router, response::IntoResponse, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
-use sea_orm::Database;
+use migration::MigratorTrait;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, QueryFilter};
 use shared::register::{Register, RegisterSuccess};
 use std::net::SocketAddr;
 
 pub async fn run() -> anyhow::Result<()> {
+    //准备数据库
     let server_db_url = std::env::var("SERVER_DATABASE")?;
     let db = Database::connect(server_db_url).await?;
     migration::Migrator::up(&db, None).await?;
+
+    //准备状态
+    let app_state = AppState { db };
     // 你的路由
-    let app = Router::new().route(r"/register", post(register));
+    let app = Router::new()
+        .route(r"/register", post(register))
+        .with_state(app_state);
 
     // 載入證書與私鑰（PEM 格式）
     // 正式環境請使用 Let's Encrypt 或其他正規憑證
@@ -30,17 +41,48 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 #[axum::debug_handler]
-async fn register(Json(register): Json<Register>) -> Result<impl IntoResponse, RegisterError> {
-    let correct = Register {
-        user_name: "123".to_string(),
-        account: "123".to_string(),
-        password: "123".to_string(),
-    };
-    if register.account == correct.account {
-        return Err(RegisterError::AlreadyExist);
+async fn register(
+    State(state): State<AppState>,
+    Json(register): Json<Register>,
+) -> Result<impl IntoResponse, RegisterError> {
+    if let Err(e) = _register(state, register).await {
+        dbg!(&e);
+        match e.downcast::<RegisterError>() {
+            Ok(o) => {
+                return Err(o);
+            }
+            Err(e) => {
+                dbg!(&e);
+            }
+        };
+    }
+    Ok(Json(RegisterSuccess))
+}
+async fn _register(state: AppState, register: Register) -> anyhow::Result<impl IntoResponse> {
+    let db = state.db;
+    let opt_account = Accounts::find()
+        .filter(accounts::COLUMN.account.eq(register.account.clone()))
+        .one(&db)
+        .await?;
+    if opt_account.is_some() {
+        return Err(RegisterError::AlreadyExist.into());
     }
 
+    let _m = accounts::ActiveModel {
+        uuid: Set(uuid::Uuid::new_v4()),
+        user_name: Set(register.user_name),
+        account: Set(register.account),
+        password: Set(register.password.into()),
+        create_at: Set(chrono::Utc::now()),
+    }
+    .insert(&db)
+    .await?;
+
     Ok(Json(RegisterSuccess))
+}
+#[derive(Debug, Clone)]
+struct AppState {
+    db: DatabaseConnection,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -48,9 +90,6 @@ enum RegisterError {
     #[error("this account is already existence")]
     AlreadyExist,
 }
-use axum::http::StatusCode;
-use migration::MigratorTrait;
-
 impl IntoResponse for RegisterError {
     fn into_response(self) -> axum::response::Response {
         match self {
