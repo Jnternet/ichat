@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 pub async fn run() -> anyhow::Result<()> {
     let server_db_url = std::env::var("SERVER_DATABASE")?;
     let db = Database::connect(server_db_url).await?;
+    migration::Migrator::up(&db, None).await?;
     // 你的路由
     let app = Router::new().route(r"/register", post(register));
 
@@ -48,6 +49,8 @@ enum RegisterError {
     AlreadyExist,
 }
 use axum::http::StatusCode;
+use migration::MigratorTrait;
+
 impl IntoResponse for RegisterError {
     fn into_response(self) -> axum::response::Response {
         match self {

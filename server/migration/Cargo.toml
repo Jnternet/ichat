@@ -1,9 +1,9 @@
 [package]
-edition      = "2024"
-name         = "migration"
-publish      = false
+edition = "2024"
+name = "migration"
+publish = false
 rust-version = "1.85.0"
-version      = "0.1.0"
+version = "0.1.0"
 
 [lib]
 name = "migration"
@@ -20,4 +20,4 @@ features = [
     # "runtime-tokio-rustls",  # `ASYNC_RUNTIME` feature
     # "sqlx-postgres",         # `DATABASE_DRIVER` feature
 ]
-version = "2.0.0"
+version = "2.0.0-rc"
