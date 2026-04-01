@@ -1,17 +1,11 @@
-use axum::{
-    Json, Router,
-    response::IntoResponse,
-    routing::{get, post},
-};
+use axum::{Json, Router, response::IntoResponse, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
 use shared::login::*;
 use std::net::SocketAddr;
 
 pub async fn run() -> anyhow::Result<()> {
     // 你的路由
-    let app = Router::new()
-        .route(r"/h", get(|| async { "Hello, TLS! 🔒" }))
-        .route(r"/login", post(login));
+    let app = Router::new().route(r"/login", post(login));
 
     // 載入證書與私鑰（PEM 格式）
     // 正式環境請使用 Let's Encrypt 或其他正規憑證
@@ -21,7 +15,7 @@ pub async fn run() -> anyhow::Result<()> {
     )
     .await?;
 
-    let addr = std::env::var("SERVER_SOCK_ADDR")?.parse::<SocketAddr>()?;
+    let addr = std::env::var("SERVER_LOGIN_ADDR")?.parse::<SocketAddr>()?;
 
     // 啟動 HTTPS 伺服器
     axum_server::bind_rustls(addr, tls_config)
@@ -34,16 +28,16 @@ pub async fn run() -> anyhow::Result<()> {
 #[axum::debug_handler]
 async fn login(Json(login): Json<Login>) -> Result<impl IntoResponse, LoginError> {
     let correct = Login {
-        user_name: "123".to_string(),
+        account: "123".to_string(),
         password: "123".to_string(),
     };
-    if login.user_name == correct.user_name && login.password == correct.password {
+    if login.account == correct.account && login.password == correct.password {
         return Ok(Json(LoginSuccess {
             auth: "123".to_string(),
         }));
     }
 
-    if login.user_name == correct.user_name {
+    if login.account == correct.account {
         return Err(LoginError::WrongPassword);
     }
     Err(LoginError::NotExist)
@@ -55,6 +49,7 @@ enum LoginError {
     NotExist,
     #[error("WrongPassword")]
     WrongPassword,
+    // 不应向客户端暴露服务器错误
     // #[error("Internal Error: {0}")]
     // Internal(#[from] anyhow::Error),
 }

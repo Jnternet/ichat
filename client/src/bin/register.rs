@@ -1,6 +1,6 @@
 use anyhow::bail;
 use reqwest::Client;
-use shared::login::*;
+use shared::register::*;
 use shared::serde_json;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let client_config = rustls::ClientConfig::builder()
         .with_root_certificates(root_cert_store)
         .with_no_client_auth();
-    let server_addr = std::env::var("SERVER_LOGIN_ADDR")?;
+    let server_addr = std::env::var("SERVER_REGISTER_ADDR")?;
     let server_name = std::env::var("SERVER_NAME")?;
 
     let client = reqwest::Client::builder()
@@ -20,26 +20,31 @@ async fn main() -> anyhow::Result<()> {
         .no_proxy()
         .build()?;
 
-    let url = format!("https://{}/login", server_name);
-    let login_example = Login {
-        account: "123".to_string(),
+    let url = format!("https://{}/register", server_name);
+    let register_example = Register {
+        user_name: "123".to_string(),
+        account: "1232".to_string(),
         password: "1232".to_string(),
     };
-    let res = login(&client, &url, &login_example).await;
+    let res = register(&client, &url, &register_example).await;
     dbg!(&res);
 
     std::thread::park();
     anyhow::Ok(())
 }
-async fn login(client: &Client, url: &str, login: &Login) -> anyhow::Result<LoginResponse> {
-    let text = client.post(url).json(login).send().await?.text().await?;
-    let result = serde_json::from_str::<LoginSuccess>(&text);
+async fn register(
+    client: &Client,
+    url: &str,
+    register: &Register,
+) -> anyhow::Result<RegisterResponse> {
+    let text = client.post(url).json(register).send().await?.text().await?;
+    let result = serde_json::from_str::<RegisterSuccess>(&text);
     if let Ok(s) = result {
-        return Ok(LoginResponse::Success(s));
+        return Ok(RegisterResponse::Success(s));
     }
-    let result = serde_json::from_str::<LoginError>(&text);
+    let result = serde_json::from_str::<RegisterError>(&text);
     if let Ok(e) = result {
-        return Ok(LoginResponse::Fail(e));
+        return Ok(RegisterResponse::Fail(e));
     }
     bail!("cannot resolve response")
 }

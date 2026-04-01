@@ -1,26 +1,23 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Login {
+pub struct Register {
+    pub user_name: String,
     pub account: String,
     pub password: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LoginSuccess {
-    pub auth: String,
-}
+pub struct RegisterSuccess;
 
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
-pub enum LoginError {
-    #[error("this account does not exist")]
-    NotExist,
-    #[error("WrongPassword")]
-    WrongPassword,
+pub enum RegisterError {
+    #[error("this account is already existence")]
+    AlreadyExist,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum LoginResponse {
-    Success(LoginSuccess),
-    Fail(LoginError),
+pub enum RegisterResponse {
+    Success(RegisterSuccess),
+    Fail(RegisterError),
 }

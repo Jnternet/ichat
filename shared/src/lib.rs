@@ -3,6 +3,7 @@ pub use serde;
 pub use serde_json;
 
 pub mod login;
+pub mod register;
 
 use rkyv::{Archive, Deserialize, Serialize};
 #[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]
