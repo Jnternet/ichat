@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct Register {
     pub user_name: String,
     pub account: String,
-    pub password: String,
+    pub password: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

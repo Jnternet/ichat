@@ -1,6 +1,7 @@
 use anyhow::bail;
 use reqwest::Client;
 use rustls::crypto::aws_lc_rs;
+use sha2::Digest;
 use shared::register::*;
 use shared::serde_json;
 #[tokio::main]
@@ -25,10 +26,12 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     let url = format!("https://{}/register", server_name);
+
+    let password = sha2::Sha256::digest("123");
     let register_example = Register {
         user_name: "123".to_string(),
-        account: "1232".to_string(),
-        password: "1232".to_string(),
+        account: "123".to_string(),
+        password: password.as_slice().into(),
     };
     let res = register(&client, &url, &register_example).await;
     dbg!(&res);

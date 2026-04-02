@@ -72,7 +72,7 @@ async fn _register(state: AppState, register: Register) -> anyhow::Result<impl I
         uuid: Set(uuid::Uuid::new_v4()),
         user_name: Set(register.user_name),
         account: Set(register.account),
-        password: Set(register.password.into()),
+        password: Set(register.password),
         create_at: Set(chrono::Utc::now()),
     }
     .insert(&db)
