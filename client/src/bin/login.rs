@@ -1,10 +1,15 @@
 use anyhow::bail;
 use reqwest::Client;
+use rustls::crypto::aws_lc_rs;
+use sha2::Digest;
 use shared::login::*;
 use shared::serde_json;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
+    aws_lc_rs::default_provider()
+        .install_default()
+        .expect("unable to set aws_lc_rs as provider");
 
     let root_cert_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -21,9 +26,10 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     let url = format!("https://{}/login", server_name);
+    let pwd = sha2::Sha256::digest("123");
     let login_example = Login {
         account: "123".to_string(),
-        password: "1232".to_string(),
+        password: pwd.as_slice().into(),
     };
     let res = login(&client, &url, &login_example).await;
     dbg!(&res);

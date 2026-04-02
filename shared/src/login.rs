@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Login {
     pub account: String,
-    pub password: String,
+    pub password: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

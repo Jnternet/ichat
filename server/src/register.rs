@@ -3,7 +3,6 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{Json, Router, response::IntoResponse, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
-use migration::MigratorTrait;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, QueryFilter};
 use shared::register::{Register, RegisterSuccess};
@@ -13,7 +12,6 @@ pub async fn run() -> anyhow::Result<()> {
     //准备数据库
     let server_db_url = std::env::var("SERVER_DATABASE")?;
     let db = Database::connect(server_db_url).await?;
-    migration::Migrator::up(&db, None).await?;
 
     //准备状态
     let app_state = AppState { db };

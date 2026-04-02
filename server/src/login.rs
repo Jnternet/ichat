@@ -1,11 +1,26 @@
+use crate::entity::accounts;
+use crate::entity::auths;
+use crate::entity::prelude::*;
+use axum::extract::State;
 use axum::{Json, Router, response::IntoResponse, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
+use sea_orm::EntityTrait;
+use sea_orm::QueryFilter;
+use sea_orm::{ActiveModelTrait, Database, Set};
+use sea_orm::{DatabaseConnection, TransactionTrait};
 use shared::login::*;
 use std::net::SocketAddr;
 
 pub async fn run() -> anyhow::Result<()> {
+    //准备数据库
+    let server_db_url = std::env::var("SERVER_DATABASE")?;
+    let db = Database::connect(server_db_url).await?;
+    //准备状态
+    let app_state = AppState { db };
     // 你的路由
-    let app = Router::new().route(r"/login", post(login));
+    let app = Router::new()
+        .route(r"/login", post(login))
+        .with_state(app_state);
 
     // 載入證書與私鑰（PEM 格式）
     // 正式環境請使用 Let's Encrypt 或其他正規憑證
@@ -26,21 +41,59 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 #[axum::debug_handler]
-async fn login(Json(login): Json<Login>) -> Result<impl IntoResponse, LoginError> {
-    let correct = Login {
-        account: "123".to_string(),
-        password: "123".to_string(),
-    };
-    if login.account == correct.account && login.password == correct.password {
-        return Ok(Json(LoginSuccess {
-            auth: "123".to_string(),
-        }));
+async fn login(
+    State(state): State<AppState>,
+    Json(login): Json<Login>,
+) -> Result<impl IntoResponse, LoginError> {
+    match _login(state, login).await {
+        Ok(ir) => Ok(ir),
+        Err(e) => {
+            let r = e.downcast::<LoginError>();
+            if r.is_err() {
+                dbg!(r.as_ref().err().unwrap());
+            }
+            Err(r.unwrap())
+        }
+    }
+}
+
+async fn _login(state: AppState, login: Login) -> anyhow::Result<impl IntoResponse> {
+    let db = state.db;
+    let txn = db.begin().await?;
+
+    //查看登录请求是否合规
+    let opt_ac = Accounts::find()
+        .filter(accounts::COLUMN.account.eq(login.account))
+        .one(&txn)
+        .await?;
+    if opt_ac.is_none() {
+        return Err(LoginError::NotExist.into());
+    }
+    let ac = opt_ac.unwrap();
+    if ac.password != login.password {
+        return Err(LoginError::WrongPassword.into());
     }
 
-    if login.account == correct.account {
-        return Err(LoginError::WrongPassword);
+    //此时必然账号存在且密码正确
+    //创建令牌
+    let au = auths::ActiveModel {
+        token: Set(uuid::Uuid::new_v4()),
+        account: Set(ac.uuid),
+        create_at: Set(chrono::Utc::now()),
     }
-    Err(LoginError::NotExist)
+    .insert(&txn)
+    .await?;
+
+    //事务提交
+    txn.commit().await?;
+
+    Ok(Json(LoginSuccess {
+        auth: au.token.to_string(),
+    }))
+}
+#[derive(Debug, Clone)]
+struct AppState {
+    db: DatabaseConnection,
 }
 
 #[derive(Debug, thiserror::Error)]
