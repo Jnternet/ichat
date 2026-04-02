@@ -4,7 +4,9 @@ use axum::http::StatusCode;
 use axum::{Json, Router, response::IntoResponse, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
+};
 use shared::register::{Register, RegisterSuccess};
 use std::net::SocketAddr;
 
@@ -58,9 +60,10 @@ async fn register(
 }
 async fn _register(state: AppState, register: Register) -> anyhow::Result<impl IntoResponse> {
     let db = state.db;
+    let txn = db.begin().await?;
     let opt_account = Accounts::find()
         .filter(accounts::COLUMN.account.eq(register.account.clone()))
-        .one(&db)
+        .one(&txn)
         .await?;
     if opt_account.is_some() {
         return Err(RegisterError::AlreadyExist.into());
@@ -73,8 +76,9 @@ async fn _register(state: AppState, register: Register) -> anyhow::Result<impl I
         password: Set(register.password),
         create_at: Set(chrono::Utc::now()),
     }
-    .insert(&db)
+    .insert(&txn)
     .await?;
+    txn.commit().await?;
 
     Ok(Json(RegisterSuccess))
 }

@@ -13,13 +13,13 @@ async fn main() -> anyhow::Result<()> {
     let connector = get_connector();
     let mut tls_stream = get_tls_stream(&connector, &server_addr, &server_name).await?;
 
-    let t = Test::new("client msg".to_string());
-    let buf = rkyv::to_bytes::<rkyv::rancor::Error>(&t)?;
-    tls_stream.write_all(&buf).await?;
-    tls_stream.flush().await?;
-    let mut buf = BytesMut::with_capacity(4096);
-    tls_stream.read_buf(&mut buf).await?;
-    println!("服务器消息：{}", std::str::from_utf8(&buf)?);
+    // let t = Test::new("client msg".to_string());
+    // let buf = rkyv::to_bytes::<rkyv::rancor::Error>(&t)?;
+    // tls_stream.write_all(&buf).await?;
+    // tls_stream.flush().await?;
+    // let mut buf = BytesMut::with_capacity(4096);
+    // tls_stream.read_buf(&mut buf).await?;
+    // println!("服务器消息：{}", std::str::from_utf8(&buf)?);
 
     std::thread::park();
     anyhow::Ok(())

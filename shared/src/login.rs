@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::auth::Auth;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Login {
     pub account: String,
@@ -8,7 +10,7 @@ pub struct Login {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoginSuccess {
-    pub auth: String,
+    pub auth: Auth,
 }
 
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]

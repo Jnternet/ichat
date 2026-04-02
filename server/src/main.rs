@@ -3,6 +3,7 @@ use rustls::crypto::aws_lc_rs;
 use sea_orm::Database;
 use std::thread::park;
 
+mod auth;
 mod entity;
 mod login;
 mod register;

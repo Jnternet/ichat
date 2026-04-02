@@ -8,6 +8,7 @@ use sea_orm::EntityTrait;
 use sea_orm::QueryFilter;
 use sea_orm::{ActiveModelTrait, Database, Set};
 use sea_orm::{DatabaseConnection, TransactionTrait};
+use shared::auth::Auth;
 use shared::login::*;
 use std::net::SocketAddr;
 
@@ -88,7 +89,7 @@ async fn _login(state: AppState, login: Login) -> anyhow::Result<impl IntoRespon
     txn.commit().await?;
 
     Ok(Json(LoginSuccess {
-        auth: au.token.to_string(),
+        auth: Auth::new(&au.account.to_string(), &au.token.to_string()),
     }))
 }
 #[derive(Debug, Clone)]
