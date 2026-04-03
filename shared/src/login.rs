@@ -19,6 +19,8 @@ pub enum LoginError {
     NotExist,
     #[error("WrongPassword")]
     WrongPassword,
+    #[error("Something wrong in server")]
+    ServerWrong,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -45,7 +45,7 @@ async fn _auth(db: &impl ConnectionTrait, auth: &Auth) -> anyhow::Result<bool> {
 mod tests {
     use super::*;
     use migration::MigratorTrait;
-    use sea_orm::{ActiveModelTrait, Database, Iden, Set, TransactionTrait};
+    use sea_orm::{ActiveModelTrait, Database, Set};
     use sha2::Digest;
 
     #[tokio::test]
