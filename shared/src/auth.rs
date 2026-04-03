@@ -1,21 +1,22 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Auth {
-    account_id: String,
+    account_id: Uuid,
     token: String,
 }
 impl Auth {
-    pub fn new(account_id: &str, token: &str) -> Self {
+    pub fn new(account_id: Uuid, token: &str) -> Self {
         Auth {
-            account_id: account_id.into(),
+            account_id,
             token: token.into(),
         }
     }
     pub fn token(&self) -> &str {
         &self.token
     }
-    pub fn account_id(&self) -> &str {
-        &self.account_id
+    pub fn account_id(&self) -> Uuid {
+        self.account_id
     }
 }

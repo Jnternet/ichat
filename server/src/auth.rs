@@ -18,11 +18,7 @@ async fn _auth(db: &impl ConnectionTrait, auth: &Auth) -> anyhow::Result<bool> {
     // 证明存在且账号令牌相对应
     let a = Auths::find()
         .filter(auths::COLUMN.token.eq(uuid::Uuid::from_str(auth.token())?))
-        .filter(
-            auths::COLUMN
-                .account
-                .eq(uuid::Uuid::from_str(auth.account_id())?),
-        )
+        .filter(auths::COLUMN.account.eq(auth.account_id()))
         .one(db)
         .await?
         .context("Wrong authentication")?;
@@ -60,13 +56,13 @@ mod tests {
         //准备测试数据
         let token = "ddda6ea7f0ad4e98b689b96431fb5926";
         let fake_token = "ddda6ea7f0ad4e98b689b96431fb5927";
-        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
         let au = Auth::new(account_id, token);
         let fake_au = Auth::new(account_id, fake_token);
 
         //插入到数据库中
         let _m = accounts::ActiveModel {
-            uuid: Set(account_id.parse()?),
+            uuid: Set(account_id),
             user_name: Set("123".to_string()),
             account: Set("123".to_string()),
             password: Set(sha2::Sha256::digest("123").as_slice().into()),
@@ -76,7 +72,7 @@ mod tests {
         .await?;
         let _a = auths::ActiveModel {
             token: Set(token.parse()?),
-            account: Set(account_id.parse()?),
+            account: Set(account_id),
             create_at: Set(chrono::Utc::now()),
         }
         .insert(&db)

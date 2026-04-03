@@ -96,7 +96,7 @@ async fn _login(state: AppState, login: Login) -> anyhow::Result<impl IntoRespon
     txn.commit().await?;
 
     Ok(Json(LoginSuccess {
-        auth: Auth::new(&au.account.to_string(), &au.token.to_string()),
+        auth: Auth::new(au.account, &au.token.to_string()),
     }))
 }
 #[derive(Debug, Clone)]
