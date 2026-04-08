@@ -5,7 +5,7 @@ pub struct Group {
     pub id: GroupId,
     pub name: String,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct GroupId(pub uuid::Uuid);
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateGroup {
