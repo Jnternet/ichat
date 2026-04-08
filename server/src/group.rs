@@ -1,7 +1,7 @@
 use crate::auth;
 use crate::entity::groups;
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ConnectionTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use shared::group::CreateGroup;
 use shared::{auth::Auth, group::Group};
 
@@ -31,14 +31,88 @@ pub async fn join_group(
     auth: Auth,
     group: Group,
 ) -> Result<(), GroupError> {
-    todo!()
+    // 1. 验证 token
+    if !auth::auth(db, &auth).await {
+        return Err(GroupError::NoPermission);
+    }
+
+    // 2. 检查群组是否存在
+    let group_entity = groups::Entity::find_by_id(group.id.0)
+        .one(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    if group_entity.is_none() {
+        return Err(GroupError::GroupNotFound);
+    }
+
+    // 3. 检查用户是否已经在群组中
+    use crate::entity::account_group;
+    let existing = account_group::Entity::find()
+        .filter(account_group::Column::AccountUuid.eq(auth.account_id()))
+        .filter(account_group::Column::GroupUuid.eq(group.id.0))
+        .one(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    if existing.is_some() {
+        // 用户已经在群组中，直接返回成功
+        return Ok(());
+    }
+
+    // 4. 将用户添加到群组
+    let new_account_group = account_group::ActiveModel {
+        account_uuid: Set(auth.account_id()),
+        group_uuid: Set(group.id.0),
+    };
+
+    new_account_group.insert(db).await.map_err(anyhow::Error::from)?;
+    Ok(())
 }
 pub async fn exit_group(
     db: &impl ConnectionTrait,
     auth: Auth,
     group: Group,
 ) -> Result<(), GroupError> {
-    todo!()
+    // 1. 验证 token
+    if !auth::auth(db, &auth).await {
+        return Err(GroupError::NoPermission);
+    }
+
+    // 2. 检查群组是否存在
+    let group_entity = groups::Entity::find_by_id(group.id.0)
+        .one(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    if group_entity.is_none() {
+        return Err(GroupError::GroupNotFound);
+    }
+
+    // 3. 检查用户是否在群组中
+    use crate::entity::account_group;
+    let existing = account_group::Entity::find()
+        .filter(account_group::Column::AccountUuid.eq(auth.account_id()))
+        .filter(account_group::Column::GroupUuid.eq(group.id.0))
+        .one(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    if existing.is_none() {
+        // 用户不在群组中，直接返回成功
+        return Ok(());
+    }
+
+    // 4. 将用户从群组中移除
+    use sea_orm::DeleteResult;
+    let delete_result = account_group::Entity::delete_many()
+        .filter(account_group::Column::AccountUuid.eq(auth.account_id()))
+        .filter(account_group::Column::GroupUuid.eq(group.id.0))
+        .exec(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    Ok(())
 }
 
 pub async fn delete_group(
@@ -46,7 +120,28 @@ pub async fn delete_group(
     auth: Auth,
     group: Group,
 ) -> Result<(), GroupError> {
-    todo!()
+    // 1. 验证 token
+    if !auth::auth(db, &auth).await {
+        return Err(GroupError::NoPermission);
+    }
+
+    // 2. 检查群组是否存在
+    let group_entity = groups::Entity::find_by_id(group.id.0)
+        .one(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    if group_entity.is_none() {
+        return Err(GroupError::GroupNotFound);
+    }
+
+    // 3. 删除群组（级联删除会自动删除相关的 account_group 记录）
+    let delete_result = groups::Entity::delete_by_id(group.id.0)
+        .exec(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,7 +159,7 @@ mod test {
     use super::*;
     use crate::entity::{accounts, auths, groups};
     use migration::MigratorTrait;
-    use sea_orm::{ActiveModelTrait, Database, EntityTrait};
+    use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter};
     use sha2::Digest;
 
     #[tokio::test]
@@ -197,6 +292,625 @@ mod test {
         // 验证群组是否成功创建
         let groups = groups::Entity::find().all(&db).await?;
         assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_join_group_success() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 创建一个群组
+        let create_group = CreateGroup { name: "Test Group".to_string() };
+        let result = super::create_group(&db, au, create_group).await;
+        assert!(result.is_ok(), "创建群组失败: {:?}", result);
+
+        // 获取群组信息
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+        let group_id = groups[0].uuid;
+        let group = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+
+        // 重新创建 auth 和 group 实例
+        let au2 = Auth::new(account_id, token);
+        let group2 = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+        
+        // 执行加入群组操作
+        let result = super::join_group(&db, au2, group2).await;
+        assert!(result.is_ok(), "加入群组失败: {:?}", result);
+
+        // 验证用户是否成功加入群组
+        use crate::entity::account_group;
+        let account_groups = account_group::Entity::find()
+            .filter(account_group::Column::AccountUuid.eq(account_id))
+            .filter(account_group::Column::GroupUuid.eq(group_id))
+            .all(&db)
+            .await?;
+        assert_eq!(account_groups.len(), 1, "用户应该成功加入群组");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_join_group_no_permission() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let invalid_token = "invalid_token_12345";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, invalid_token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 创建一个群组
+        let create_group = CreateGroup { name: "Test Group".to_string() };
+        let valid_au = Auth::new(account_id, token);
+        let result = super::create_group(&db, valid_au, create_group).await;
+        assert!(result.is_ok(), "创建群组失败: {:?}", result);
+
+        // 获取群组信息
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+        let group_id = groups[0].uuid;
+        let group = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+
+        // 执行加入群组操作
+        let result = super::join_group(&db, au, group).await;
+        assert!(result.is_err(), "应该返回权限错误");
+        match result.unwrap_err() {
+            GroupError::NoPermission => {},
+            _ => panic!("应该返回 NoPermission 错误"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_join_group_not_found() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 使用不存在的群组 ID
+        let non_existent_group_id = uuid::Uuid::new_v4();
+        let group = Group { id: shared::group::GroupId(non_existent_group_id), name: "Non-existent Group".to_string() };
+
+        // 执行加入群组操作
+        let result = super::join_group(&db, au, group).await;
+        assert!(result.is_err(), "应该返回群组不存在错误");
+        match result.unwrap_err() {
+            GroupError::GroupNotFound => {},
+            _ => panic!("应该返回 GroupNotFound 错误"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_join_group_already_in_group() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 创建一个群组
+        let create_group = CreateGroup { name: "Test Group".to_string() };
+        let result = super::create_group(&db, au, create_group).await;
+        assert!(result.is_ok(), "创建群组失败: {:?}", result);
+
+        // 获取群组信息
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+        let group_id = groups[0].uuid;
+        let group = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+
+        // 重新创建 auth 实例
+        let au2 = Auth::new(account_id, token);
+        
+        // 第一次加入群组
+        let result = super::join_group(&db, au2, group).await;
+        assert!(result.is_ok(), "第一次加入群组失败: {:?}", result);
+
+        // 重新创建 auth 和 group 实例
+        let au3 = Auth::new(account_id, token);
+        let group2 = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+        
+        // 第二次加入同一群组（应该成功，因为用户已经在群组中）
+        let result = super::join_group(&db, au3, group2).await;
+        assert!(result.is_ok(), "第二次加入群组失败: {:?}", result);
+
+        // 验证用户只在群组中一次
+        use crate::entity::account_group;
+        let account_groups = account_group::Entity::find()
+            .filter(account_group::Column::AccountUuid.eq(account_id))
+            .filter(account_group::Column::GroupUuid.eq(group_id))
+            .all(&db)
+            .await?;
+        assert_eq!(account_groups.len(), 1, "用户应该只在群组中一次");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_exit_group_success() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 创建一个群组
+        let create_group = CreateGroup { name: "Test Group".to_string() };
+        let result = super::create_group(&db, au, create_group).await;
+        assert!(result.is_ok(), "创建群组失败: {:?}", result);
+
+        // 获取群组信息
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+        let group_id = groups[0].uuid;
+        let group = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+
+        // 重新创建 auth 实例
+        let au2 = Auth::new(account_id, token);
+        
+        // 先加入群组
+        let result = super::join_group(&db, au2, group).await;
+        assert!(result.is_ok(), "加入群组失败: {:?}", result);
+
+        // 验证用户是否成功加入群组
+        use crate::entity::account_group;
+        let account_groups = account_group::Entity::find()
+            .filter(account_group::Column::AccountUuid.eq(account_id))
+            .filter(account_group::Column::GroupUuid.eq(group_id))
+            .all(&db)
+            .await?;
+        assert_eq!(account_groups.len(), 1, "用户应该成功加入群组");
+
+        // 重新创建 auth 和 group 实例
+        let au3 = Auth::new(account_id, token);
+        let group3 = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+        
+        // 执行退出群组操作
+        let result = super::exit_group(&db, au3, group3).await;
+        assert!(result.is_ok(), "退出群组失败: {:?}", result);
+
+        // 验证用户是否成功退出群组
+        let account_groups = account_group::Entity::find()
+            .filter(account_group::Column::AccountUuid.eq(account_id))
+            .filter(account_group::Column::GroupUuid.eq(group_id))
+            .all(&db)
+            .await?;
+        assert_eq!(account_groups.len(), 0, "用户应该成功退出群组");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_exit_group_no_permission() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let invalid_token = "invalid_token_12345";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, invalid_token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 创建一个群组
+        let create_group = CreateGroup { name: "Test Group".to_string() };
+        let valid_au = Auth::new(account_id, token);
+        let result = super::create_group(&db, valid_au, create_group).await;
+        assert!(result.is_ok(), "创建群组失败: {:?}", result);
+
+        // 获取群组信息
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+        let group_id = groups[0].uuid;
+        let group = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+
+        // 执行退出群组操作
+        let result = super::exit_group(&db, au, group).await;
+        assert!(result.is_err(), "应该返回权限错误");
+        match result.unwrap_err() {
+            GroupError::NoPermission => {},
+            _ => panic!("应该返回 NoPermission 错误"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_exit_group_not_found() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 使用不存在的群组 ID
+        let non_existent_group_id = uuid::Uuid::new_v4();
+        let group = Group { id: shared::group::GroupId(non_existent_group_id), name: "Non-existent Group".to_string() };
+
+        // 执行退出群组操作
+        let result = super::exit_group(&db, au, group).await;
+        assert!(result.is_err(), "应该返回群组不存在错误");
+        match result.unwrap_err() {
+            GroupError::GroupNotFound => {},
+            _ => panic!("应该返回 GroupNotFound 错误"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_exit_group_not_in_group() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 创建一个群组
+        let create_group = CreateGroup { name: "Test Group".to_string() };
+        let result = super::create_group(&db, au, create_group).await;
+        assert!(result.is_ok(), "创建群组失败: {:?}", result);
+
+        // 获取群组信息
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+        let group_id = groups[0].uuid;
+        let group = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+
+        // 重新创建 auth 实例
+        let au2 = Auth::new(account_id, token);
+        
+        // 执行退出群组操作（用户不在群组中，应该成功）
+        let result = super::exit_group(&db, au2, group).await;
+        assert!(result.is_ok(), "退出群组失败: {:?}", result);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_group_success() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 创建一个群组
+        let create_group = CreateGroup { name: "Test Group".to_string() };
+        let result = super::create_group(&db, au, create_group).await;
+        assert!(result.is_ok(), "创建群组失败: {:?}", result);
+
+        // 获取群组信息
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+        let group_id = groups[0].uuid;
+        let group = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+
+        // 重新创建 auth 实例
+        let au2 = Auth::new(account_id, token);
+        
+        // 执行删除群组操作
+        let result = super::delete_group(&db, au2, group).await;
+        assert!(result.is_ok(), "删除群组失败: {:?}", result);
+
+        // 验证群组是否成功删除
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 0, "群组应该成功删除");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_group_no_permission() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let invalid_token = "invalid_token_12345";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, invalid_token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 创建一个群组
+        let create_group = CreateGroup { name: "Test Group".to_string() };
+        let valid_au = Auth::new(account_id, token);
+        let result = super::create_group(&db, valid_au, create_group).await;
+        assert!(result.is_ok(), "创建群组失败: {:?}", result);
+
+        // 获取群组信息
+        let groups = groups::Entity::find().all(&db).await?;
+        assert_eq!(groups.len(), 1, "应该只创建了一个群组");
+        let group_id = groups[0].uuid;
+        let group = Group { id: shared::group::GroupId(group_id), name: groups[0].group_name.clone() };
+
+        // 执行删除群组操作
+        let result = super::delete_group(&db, au, group).await;
+        assert!(result.is_err(), "应该返回权限错误");
+        match result.unwrap_err() {
+            GroupError::NoPermission => {},
+            _ => panic!("应该返回 NoPermission 错误"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_group_not_found() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        // 准备数据库
+        let server_db_url = "sqlite::memory:";
+        let db = Database::connect(server_db_url).await?;
+        migration::Migrator::up(&db, None).await?;
+
+        // 准备测试数据
+        let token = "ddda6ea7f0ad4e98b689b96431fb5926";
+        let account_id = "ad89ac437cf44ad1a85f47bfaa8c618a".parse()?;
+        let au = Auth::new(account_id, token);
+
+        // 插入到数据库中
+        let _m = accounts::ActiveModel {
+            uuid: Set(account_id),
+            user_name: Set("123".to_string()),
+            account: Set("123".to_string()),
+            password: Set(sha2::Sha256::digest("123").as_slice().into()),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+        let _a = auths::ActiveModel {
+            token: Set(token.parse()?),
+            account: Set(account_id),
+            create_at: Set(chrono::Utc::now()),
+        }
+        .insert(&db)
+        .await?;
+
+        // 使用不存在的群组 ID
+        let non_existent_group_id = uuid::Uuid::new_v4();
+        let group = Group { id: shared::group::GroupId(non_existent_group_id), name: "Non-existent Group".to_string() };
+
+        // 执行删除群组操作
+        let result = super::delete_group(&db, au, group).await;
+        assert!(result.is_err(), "应该返回群组不存在错误");
+        match result.unwrap_err() {
+            GroupError::GroupNotFound => {},
+            _ => panic!("应该返回 GroupNotFound 错误"),
+        }
 
         Ok(())
     }
