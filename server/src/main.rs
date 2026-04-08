@@ -9,6 +9,7 @@ mod group;
 mod login;
 mod register;
 mod textchat;
+mod message;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
