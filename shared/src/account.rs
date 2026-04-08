@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OtherUser {
     user_name: String,
+}
+
+impl OtherUser {
+    pub fn new(user_name: String) -> OtherUser {
+        OtherUser { user_name }
+    }
 }

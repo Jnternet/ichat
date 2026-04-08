@@ -1,19 +1,29 @@
+use crate::entity::accounts;
+use crate::entity::prelude::*;
+use crate::message::save_msg;
+use anyhow::Context;
 use async_broadcast::Receiver;
 use rkyv::Archived;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use sea_orm::{Database, DatabaseConnection, EntityTrait};
+use shared::account::OtherUser;
 use shared::group::GroupId;
-use shared::message::S2C_Msg;
+use shared::message::{C2S_Msg, Msg, S2C_Msg};
 use shared::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpListener;
 use tokio_rustls::{TlsAcceptor, TlsStream};
 
 const MAX_MSG_NUM: usize = 100;
 
 pub async fn run() -> anyhow::Result<()> {
+    //准备数据库
+    let server_db_url = std::env::var("SERVER_DATABASE")?;
+    let db = Database::connect(server_db_url).await?;
+
     let server_addr = std::env::var("SERVER_TEXTCHAT_ADDR")?;
     let listener = TcpListener::bind(server_addr).await?;
 
@@ -25,8 +35,9 @@ pub async fn run() -> anyhow::Result<()> {
         let tls_stream = tls_acceptor.accept(stream).await?;
         let tls_stream = TlsStream::from(tls_stream);
 
+        let db_ = db.clone();
         tokio::spawn(async move {
-            let r = handle_client(tls_stream).await;
+            let r = handle_client(db_, tls_stream).await;
             if r.is_err() {
                 dbg!(&r);
             }
@@ -94,16 +105,40 @@ pub async fn get_acceptor() -> anyhow::Result<TlsAcceptor> {
     anyhow::Ok(TlsAcceptor::from(Arc::new(server_config)))
 }
 
-pub async fn handle_client(tls_stream: TlsStream<tokio::net::TcpStream>) -> anyhow::Result<()> {
-    // let (mut rh, mut wh) = tokio::io::split(tls_stream);
-    //
-    // let mut buf = bytes::BytesMut::new();
-    // rh.read_buf(&mut buf).await?;
-    // let ar_test = rkyv::access::<Archived<Test>, rkyv::rancor::Error>(&buf)?;
-    // dbg!(&ar_test);
-    //
-    // wh.write_all("server respond".as_bytes()).await?;
-    // wh.flush().await?;
-    //
+pub async fn handle_client(
+    db: DatabaseConnection,
+    tls_stream: TlsStream<tokio::net::TcpStream>,
+) -> anyhow::Result<()> {
+    let (rh, wh) = tokio::io::split(tls_stream);
     anyhow::Ok(())
+}
+
+async fn handle_rh(
+    db: DatabaseConnection,
+    mut read_half: ReadHalf<TlsStream<tokio::net::TcpStream>>,
+    online_groups: &mut OnlineGroups<S2C_Msg>,
+) -> anyhow::Result<()> {
+    loop {
+        let mut buf = vec![0u8; 1024];
+        read_half.read_buf(&mut buf).await?;
+        let msg = serde_json::from_slice::<C2S_Msg>(&buf)?;
+        //保存到数据库
+        save_msg(&db, msg.clone()).await?;
+        let sender_id = msg.auth().account_id();
+        let sender_name = Accounts::find_by_id(sender_id)
+            .one(&db)
+            .await?
+            .unwrap()
+            .user_name;
+        let s2c = S2C_Msg::new(OtherUser::new(sender_name), msg.msg().to_owned());
+        let gs = online_groups
+            .0
+            .get_mut(msg.target())
+            .context("没有创建在线群组")?;
+        gs.sender.broadcast(s2c).await?;
+    }
+}
+
+async fn handle_wh(read_half: WriteHalf<TlsStream<tokio::net::TcpStream>>) -> anyhow::Result<()> {
+    todo!()
 }

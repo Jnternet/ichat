@@ -6,6 +6,7 @@ use shared::message::C2S_Msg;
 use uuid;
 
 const MAX_MESSAGE_LENGTH: usize = 1000;
+/// TODO: 需要检查是否有权在群组中发信息
 /// 保存消息的函数
 ///
 /// # 参数

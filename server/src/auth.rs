@@ -6,13 +6,10 @@ use shared::auth::Auth;
 use std::str::FromStr;
 
 pub async fn auth(db: &impl ConnectionTrait, auth: &Auth) -> bool {
-    match _auth(db, auth).await {
-        Ok(b) => b,
-        Err(e) => {
-            dbg!(&e);
-            false
-        }
-    }
+    _auth(db, auth).await.unwrap_or_else(|e| {
+        dbg!(&e);
+        false
+    })
 }
 async fn _auth(db: &impl ConnectionTrait, auth: &Auth) -> anyhow::Result<bool> {
     // 证明存在且账号令牌相对应
