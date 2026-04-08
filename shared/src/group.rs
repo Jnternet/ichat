@@ -2,8 +2,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Group {
-    id: GroupId,
-    name: String,
+    pub id: GroupId,
+    pub name: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GroupId(uuid::Uuid);
+pub struct GroupId(pub uuid::Uuid);
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateGroup {
+    pub name: String,
+}

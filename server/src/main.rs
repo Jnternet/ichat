@@ -5,6 +5,7 @@ use std::thread::park;
 
 mod auth;
 mod entity;
+mod group;
 mod login;
 mod register;
 mod textchat;

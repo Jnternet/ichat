@@ -4,22 +4,16 @@ use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "accounts")]
+#[sea_orm(table_name = "groups")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub uuid: Uuid,
-    pub user_name: String,
-    #[sea_orm(unique)]
-    pub account: String,
-    #[sea_orm(column_type = "Binary(1)")]
-    pub password: Vec<u8>,
+    pub group_name: String,
     pub create_at: DateTimeUtc,
-    #[sea_orm(has_many)]
-    pub auths: HasMany<super::auths::Entity>,
     #[sea_orm(has_many)]
     pub messages: HasMany<super::messages::Entity>,
     #[sea_orm(has_many, via = "account_group")]
-    pub groups: HasMany<super::groups::Entity>,
+    pub accounts: HasMany<super::accounts::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
