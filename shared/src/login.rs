@@ -28,3 +28,11 @@ pub enum LoginResponse {
     Success(LoginSuccess),
     Fail(LoginError),
 }
+impl LoginResponse {
+    pub fn success(self) -> Option<LoginSuccess> {
+        match self {
+            LoginResponse::Success(s) => Some(s),
+            LoginResponse::Fail(e) => None,
+        }
+    }
+}

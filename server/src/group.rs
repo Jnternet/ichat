@@ -35,7 +35,7 @@ pub async fn run() -> anyhow::Result<()> {
     )
     .await?;
 
-    let addr = std::env::var("SERVER_LOGIN_ADDR")?.parse::<SocketAddr>()?;
+    let addr = std::env::var("SERVER_GROUP_ADDR")?.parse::<SocketAddr>()?;
 
     // 啟動 HTTPS 伺服器
     axum_server::bind_rustls(addr, tls_config)

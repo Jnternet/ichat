@@ -26,3 +26,9 @@ pub enum GroupError {
     #[error("UnKnown Error")]
     UnKnown,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum CreateGroupResponse {
+    Success(CreateGroupSuccess),
+    Fail(GroupError),
+}

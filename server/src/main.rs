@@ -7,9 +7,9 @@ mod auth;
 mod entity;
 mod group;
 mod login;
+mod message;
 mod register;
 mod textchat;
-mod message;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -33,6 +33,11 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::spawn(async move {
         if let Err(e) = login::run().await {
+            dbg!(e);
+        }
+    });
+    tokio::spawn(async move {
+        if let Err(e) = group::run().await {
             dbg!(e);
         }
     });
