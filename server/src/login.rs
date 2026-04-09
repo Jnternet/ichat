@@ -85,7 +85,7 @@ async fn _login(state: AppState, login: Login) -> anyhow::Result<impl IntoRespon
     //此时必然账号存在且密码正确
     //创建令牌
     let au = auths::ActiveModel {
-        token: Set(uuid::Uuid::new_v4()),
+        token: Set(uuid::Uuid::now_v7()),
         account: Set(ac.uuid),
         create_at: Set(chrono::Utc::now()),
     }

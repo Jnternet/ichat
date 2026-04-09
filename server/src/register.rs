@@ -70,7 +70,7 @@ async fn _register(state: AppState, register: Register) -> anyhow::Result<impl I
     }
 
     let _m = accounts::ActiveModel {
-        uuid: Set(uuid::Uuid::new_v4()),
+        uuid: Set(uuid::Uuid::now_v7()),
         user_name: Set(register.user_name),
         account: Set(register.account),
         password: Set(register.password),
