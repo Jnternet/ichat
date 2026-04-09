@@ -1,12 +1,10 @@
 use crate::entity::account_group;
-use crate::entity::accounts;
-use crate::entity::groups;
 use crate::entity::prelude::*;
 use crate::message::save_msg;
 use anyhow::Context;
 use async_broadcast::Receiver;
 use futures::StreamExt;
-use rkyv::Archived;
+use futures::prelude::*;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sea_orm::QueryFilter;
@@ -14,7 +12,7 @@ use sea_orm::{Database, DatabaseConnection, EntityTrait};
 use shared::account::OtherUser;
 use shared::auth::Auth;
 use shared::group::GroupId;
-use shared::message::{C2S_Msg, Msg, S2C_Msg};
+use shared::message::{C2S_Msg, S2C_Msg};
 use shared::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -54,7 +52,7 @@ pub async fn run() -> anyhow::Result<()> {
     }
 }
 #[derive(Debug, Clone)]
-struct OnlineGroups<T>(Arc<Mutex<HashMap<GroupId, GroupSender<T>>>>);
+pub struct OnlineGroups<T>(Arc<Mutex<HashMap<GroupId, GroupSender<T>>>>);
 #[derive(Debug)]
 struct GroupSender<T> {
     counter: usize,
@@ -128,7 +126,38 @@ pub async fn handle_client(
     tls_stream: TlsStream<tokio::net::TcpStream>,
     online_groups: OnlineGroups<S2C_Msg>,
 ) -> anyhow::Result<()> {
-    let (rh, wh) = tokio::io::split(tls_stream);
+    let (mut rh, wh) = tokio::io::split(tls_stream);
+    let mut buf = vec![0u8; 1024];
+    let _u = rh
+        .read_buf(&mut buf)
+        .await
+        .context("cannot read from client")?;
+    let auth = serde_json::from_slice::<Auth>(&buf).context("cannot get auth")?;
+    let v_ag: Vec<_> = AccountGroup::find()
+        .filter(account_group::COLUMN.account_uuid.eq(auth.account_id()))
+        .all(&db)
+        .await?
+        .iter()
+        .map(|m| GroupId(m.group_uuid))
+        .collect();
+    let mut v = Vec::new();
+    for gid in &v_ag {
+        //理应都有,不应凋亡
+        v.push(online_groups.join(gid).await);
+    }
+    let sa = futures::stream::select_all(v);
+    tokio::select! {
+        r = handle_rh(db,rh,online_groups.clone(),auth) => {
+            dbg!(&r);
+        },
+        r = handle_wh(wh,sa) => {
+            dbg!(&r);
+        },
+    }
+    for gid in &v_ag {
+        online_groups.exit(gid).await
+    }
+
     anyhow::Ok(())
 }
 
@@ -159,25 +188,9 @@ async fn handle_rh(
 }
 
 async fn handle_wh(
-    db: DatabaseConnection,
     mut write_half: WriteHalf<TlsStream<tokio::net::TcpStream>>,
-    online_groups: OnlineGroups<S2C_Msg>,
-    auth: Auth,
+    mut sa: stream::SelectAll<Receiver<S2C_Msg>>,
 ) -> anyhow::Result<()> {
-    let v_ag: Vec<_> = AccountGroup::find()
-        .filter(account_group::COLUMN.account_uuid.eq(auth.account_id()))
-        .all(&db)
-        .await?
-        .iter()
-        .map(|m| GroupId(m.group_uuid))
-        .collect();
-    let mg = online_groups.0.lock().await;
-    let mut v = Vec::new();
-    for gid in v_ag {
-        //理应都有,不应凋亡
-        v.push(mg.get(&gid).unwrap().sender.new_receiver());
-    }
-    let mut sa = futures::stream::select_all(v);
     while let Some(m) = sa.next().await {
         write_half
             .write_all(serde_json::to_vec(&m)?.as_slice())
