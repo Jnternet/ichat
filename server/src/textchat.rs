@@ -4,6 +4,7 @@ use crate::message::save_msg;
 use anyhow::Context;
 use async_broadcast::Receiver;
 use futures::StreamExt;
+use futures::prelude::*;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sea_orm::QueryFilter;
@@ -56,6 +57,7 @@ pub struct OnlineGroups<T>(Arc<Mutex<HashMap<GroupId, GroupSender<T>>>>);
 struct GroupSender<T> {
     counter: usize,
     sender: async_broadcast::Sender<T>,
+    //This prevents the channel from being closed after it is created.
     _recv: async_broadcast::Receiver<T>,
 }
 impl<T> GroupSender<T> {
@@ -136,10 +138,7 @@ pub async fn handle_client(
         .read_buf(&mut buf)
         .await
         .context("cannot read from client")?;
-    dbg!(&u);
-    dbg!(&String::from_utf8_lossy(&buf[..u]));
     let auth = serde_json::from_slice::<Auth>(&buf[..u]).context("cannot get auth")?;
-    // buf.clear();
     let v_ag: Vec<_> = AccountGroup::find()
         .filter(account_group::COLUMN.account_uuid.eq(auth.account_id()))
         .all(&db)
@@ -152,20 +151,17 @@ pub async fn handle_client(
         //理应都有,不应凋亡
         v.push(online_groups.join(gid).await);
     }
-    dbg!(&online_groups);
-    dbg!(&v);
-    // let sa = futures::stream::select_all(v);
+    let sa = futures::stream::select_all(v);
     eprintln!("准备启动rh与wh");
     tokio::select! {
         r = handle_rh(db,rh,online_groups.clone(),auth) => {
             dbg!(&r);
         },
-        r = handle_wh(wh,v) => {
+        r = handle_wh(wh,sa) => {
             dbg!(&r);
         },
     }
     eprintln!("出现错误，退出所有群组");
-    dbg!(&online_groups);
     for gid in &v_ag {
         online_groups.exit(gid).await
     }
@@ -206,10 +202,9 @@ async fn handle_rh(
 
 async fn handle_wh(
     mut write_half: WriteHalf<TlsStream<tokio::net::TcpStream>>,
-    v: Vec<Receiver<S2C_Msg>>,
+    mut sa: stream::SelectAll<Receiver<S2C_Msg>>,
 ) -> anyhow::Result<()> {
     eprintln!("进入handle_wh");
-    let mut sa = futures::stream::select_all(v);
     while let Some(m) = sa.next().await {
         write_half
             .write_all(serde_json::to_vec(&m)?.as_slice())
