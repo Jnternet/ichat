@@ -127,13 +127,15 @@ pub async fn handle_client(
     online_groups: OnlineGroups<S2C_Msg>,
 ) -> anyhow::Result<()> {
     let (mut rh, wh) = tokio::io::split(tls_stream);
-    let mut buf = vec![0u8; 1024];
-    let _u = rh
+    let mut buf = Vec::with_capacity(1024);
+    let u = rh
         .read_buf(&mut buf)
         .await
         .context("cannot read from client")?;
-    dbg!(&_u);
-    let auth = serde_json::from_slice::<Auth>(&buf).context("cannot get auth")?;
+    dbg!(&u);
+    dbg!(&String::from_utf8_lossy(&buf[..u]));
+    let auth = serde_json::from_slice::<Auth>(&buf[..u]).context("cannot get auth")?;
+    buf.clear();
     let v_ag: Vec<_> = AccountGroup::find()
         .filter(account_group::COLUMN.account_uuid.eq(auth.account_id()))
         .all(&db)
@@ -173,9 +175,10 @@ async fn handle_rh(
 ) -> anyhow::Result<()> {
     eprintln!("进入handle_rh");
     loop {
-        let mut buf = vec![0u8; 1024];
+        let mut buf = Vec::with_capacity(1024);
         read_half.read_buf(&mut buf).await?;
         let msg = serde_json::from_slice::<C2S_Msg>(&buf)?;
+        buf.clear();
         //保存到数据库
         save_msg(&db, msg.clone()).await?;
         let sender_id = msg.auth().account_id();
