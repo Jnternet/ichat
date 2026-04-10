@@ -46,12 +46,17 @@ impl C2S_Msg {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct S2C_Msg {
     sender: OtherUser,
+    target: GroupId,
     msg: Msg,
 }
 
 impl S2C_Msg {
-    pub fn new(sender: OtherUser, msg: Msg) -> Self {
-        Self { sender, msg }
+    pub fn new(sender: OtherUser, msg: Msg, target: GroupId) -> Self {
+        Self {
+            sender,
+            msg,
+            target,
+        }
     }
     pub fn sender(&self) -> &OtherUser {
         &self.sender
@@ -62,5 +67,8 @@ impl S2C_Msg {
     }
     pub fn sender_name(&self) -> &str {
         self.sender.user_name()
+    }
+    pub fn target(&self) -> &GroupId {
+        &self.target
     }
 }

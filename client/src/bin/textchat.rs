@@ -57,7 +57,12 @@ async fn main() -> anyhow::Result<()> {
                     let msg = serde_json::from_slice::<shared::message::S2C_Msg>(&buf[..n]);
                     match msg {
                         Ok(s2c_msg) => {
-                            println!("\n[{}]: {}", s2c_msg.sender_name(), s2c_msg.msg().text());
+                            println!(
+                                "\n[{}]: {}|来自群:{:?}",
+                                s2c_msg.sender_name(),
+                                s2c_msg.msg().text(),
+                                s2c_msg.target(),
+                            );
                             print!("输入消息: ");
                             stdout().flush().unwrap();
                         }

@@ -190,7 +190,11 @@ async fn handle_rh(
             .await?
             .unwrap()
             .user_name;
-        let s2c = S2C_Msg::new(OtherUser::new(sender_name), msg.msg().to_owned());
+        let s2c = S2C_Msg::new(
+            OtherUser::new(sender_name),
+            msg.msg().to_owned(),
+            *msg.target(),
+        );
         //缩短持有锁的时间
         let gs = {
             let mg = online_groups.0.lock().await;
