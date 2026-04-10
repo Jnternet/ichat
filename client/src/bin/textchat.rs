@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     // 接收消息的任务
     tokio::spawn(async move {
         let mut read_half = read_half;
-        let mut buf = vec![0u8; 1024];
+        let mut buf = bytes::BytesMut::with_capacity(1024);
         loop {
             match read_half.read_buf(&mut buf).await {
                 Ok(n) if n > 0 => {
@@ -73,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
             }
+            // buf.clear();
         }
     });
 

@@ -4,7 +4,6 @@ use crate::message::save_msg;
 use anyhow::Context;
 use async_broadcast::Receiver;
 use futures::StreamExt;
-use futures::prelude::*;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sea_orm::QueryFilter;
@@ -57,10 +56,15 @@ pub struct OnlineGroups<T>(Arc<Mutex<HashMap<GroupId, GroupSender<T>>>>);
 struct GroupSender<T> {
     counter: usize,
     sender: async_broadcast::Sender<T>,
+    _recv: async_broadcast::Receiver<T>,
 }
 impl<T> GroupSender<T> {
-    fn new(sender: async_broadcast::Sender<T>) -> Self {
-        GroupSender { counter: 0, sender }
+    fn new(sender: async_broadcast::Sender<T>, _recv: async_broadcast::Receiver<T>) -> Self {
+        GroupSender {
+            counter: 0,
+            sender,
+            _recv,
+        }
     }
     fn join(&mut self) {
         self.counter += 1;
@@ -78,8 +82,8 @@ impl<T> OnlineGroups<T> {
     async fn join(&self, group: &GroupId) -> Receiver<T> {
         let mut mg = self.0.lock().await;
         let gs = mg.entry(*group).or_insert_with(|| {
-            let (sender, _) = async_broadcast::broadcast::<T>(MAX_MSG_NUM);
-            GroupSender::new(sender)
+            let (sender, recv) = async_broadcast::broadcast::<T>(MAX_MSG_NUM);
+            GroupSender::new(sender, recv)
         });
         gs.join();
         gs.sender.new_receiver()
@@ -127,7 +131,7 @@ pub async fn handle_client(
     online_groups: OnlineGroups<S2C_Msg>,
 ) -> anyhow::Result<()> {
     let (mut rh, wh) = tokio::io::split(tls_stream);
-    let mut buf = Vec::with_capacity(1024);
+    let mut buf = bytes::BytesMut::with_capacity(1024);
     let u = rh
         .read_buf(&mut buf)
         .await
@@ -135,7 +139,7 @@ pub async fn handle_client(
     dbg!(&u);
     dbg!(&String::from_utf8_lossy(&buf[..u]));
     let auth = serde_json::from_slice::<Auth>(&buf[..u]).context("cannot get auth")?;
-    buf.clear();
+    // buf.clear();
     let v_ag: Vec<_> = AccountGroup::find()
         .filter(account_group::COLUMN.account_uuid.eq(auth.account_id()))
         .all(&db)
@@ -148,17 +152,20 @@ pub async fn handle_client(
         //理应都有,不应凋亡
         v.push(online_groups.join(gid).await);
     }
-    let sa = futures::stream::select_all(v);
+    dbg!(&online_groups);
+    dbg!(&v);
+    // let sa = futures::stream::select_all(v);
     eprintln!("准备启动rh与wh");
     tokio::select! {
         r = handle_rh(db,rh,online_groups.clone(),auth) => {
             dbg!(&r);
         },
-        r = handle_wh(wh,sa) => {
+        r = handle_wh(wh,v) => {
             dbg!(&r);
         },
     }
     eprintln!("出现错误，退出所有群组");
+    dbg!(&online_groups);
     for gid in &v_ag {
         online_groups.exit(gid).await
     }
@@ -175,10 +182,10 @@ async fn handle_rh(
 ) -> anyhow::Result<()> {
     eprintln!("进入handle_rh");
     loop {
-        let mut buf = Vec::with_capacity(1024);
+        let mut buf = bytes::BytesMut::with_capacity(1024);
         read_half.read_buf(&mut buf).await?;
         let msg = serde_json::from_slice::<C2S_Msg>(&buf)?;
-        buf.clear();
+        // buf.clear();
         //保存到数据库
         save_msg(&db, msg.clone()).await?;
         let sender_id = msg.auth().account_id();
@@ -193,15 +200,16 @@ async fn handle_rh(
             let mg = online_groups.0.lock().await;
             mg.get(msg.target()).context("没有创建在线群组")?.clone()
         };
-        gs.sender.broadcast(s2c).await?;
+        gs.sender.broadcast_direct(s2c).await?;
     }
 }
 
 async fn handle_wh(
     mut write_half: WriteHalf<TlsStream<tokio::net::TcpStream>>,
-    mut sa: stream::SelectAll<Receiver<S2C_Msg>>,
+    v: Vec<Receiver<S2C_Msg>>,
 ) -> anyhow::Result<()> {
     eprintln!("进入handle_wh");
+    let mut sa = futures::stream::select_all(v);
     while let Some(m) = sa.next().await {
         write_half
             .write_all(serde_json::to_vec(&m)?.as_slice())
