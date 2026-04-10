@@ -60,4 +60,7 @@ impl S2C_Msg {
     pub fn msg(&self) -> &Msg {
         &self.msg
     }
+    pub fn sender_name(&self) -> &str {
+        self.sender.user_name()
+    }
 }

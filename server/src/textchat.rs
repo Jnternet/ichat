@@ -132,6 +132,7 @@ pub async fn handle_client(
         .read_buf(&mut buf)
         .await
         .context("cannot read from client")?;
+    dbg!(&_u);
     let auth = serde_json::from_slice::<Auth>(&buf).context("cannot get auth")?;
     let v_ag: Vec<_> = AccountGroup::find()
         .filter(account_group::COLUMN.account_uuid.eq(auth.account_id()))
@@ -146,6 +147,7 @@ pub async fn handle_client(
         v.push(online_groups.join(gid).await);
     }
     let sa = futures::stream::select_all(v);
+    eprintln!("准备启动rh与wh");
     tokio::select! {
         r = handle_rh(db,rh,online_groups.clone(),auth) => {
             dbg!(&r);
@@ -154,6 +156,7 @@ pub async fn handle_client(
             dbg!(&r);
         },
     }
+    eprintln!("出现错误，退出所有群组");
     for gid in &v_ag {
         online_groups.exit(gid).await
     }
@@ -168,6 +171,7 @@ async fn handle_rh(
     online_groups: OnlineGroups<S2C_Msg>,
     _auth: Auth,
 ) -> anyhow::Result<()> {
+    eprintln!("进入handle_rh");
     loop {
         let mut buf = vec![0u8; 1024];
         read_half.read_buf(&mut buf).await?;
@@ -194,6 +198,7 @@ async fn handle_wh(
     mut write_half: WriteHalf<TlsStream<tokio::net::TcpStream>>,
     mut sa: stream::SelectAll<Receiver<S2C_Msg>>,
 ) -> anyhow::Result<()> {
+    eprintln!("进入handle_wh");
     while let Some(m) = sa.next().await {
         write_half
             .write_all(serde_json::to_vec(&m)?.as_slice())
