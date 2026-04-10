@@ -53,7 +53,7 @@ pub async fn run() -> anyhow::Result<()> {
 }
 #[derive(Debug, Clone)]
 pub struct OnlineGroups<T>(Arc<Mutex<HashMap<GroupId, GroupSender<T>>>>);
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct GroupSender<T> {
     counter: usize,
     sender: async_broadcast::Sender<T>,
@@ -181,8 +181,11 @@ async fn handle_rh(
             .unwrap()
             .user_name;
         let s2c = S2C_Msg::new(OtherUser::new(sender_name), msg.msg().to_owned());
-        let mut mg = online_groups.0.lock().await;
-        let gs = mg.get_mut(msg.target()).context("没有创建在线群组")?;
+        //缩短持有锁的时间
+        let gs = {
+            let mg = online_groups.0.lock().await;
+            mg.get(msg.target()).context("没有创建在线群组")?.clone()
+        };
         gs.sender.broadcast(s2c).await?;
     }
 }
