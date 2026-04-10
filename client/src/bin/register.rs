@@ -27,10 +27,10 @@ async fn main() -> anyhow::Result<()> {
 
     let url = format!("https://{}/register", server_name);
 
-    let password = sha2::Sha256::digest("123");
+    let password = sha2::Sha256::digest("111");
     let register_example = Register {
-        user_name: "123".to_string(),
-        account: "123".to_string(),
+        user_name: "111".to_string(),
+        account: "111".to_string(),
         password: password.as_slice().into(),
     };
     let res = register(&client, &url, &register_example).await;

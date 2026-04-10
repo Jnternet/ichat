@@ -31,9 +31,9 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     let url = format!("https://{}/login", server_name);
-    let pwd = sha2::Sha256::digest("123");
+    let pwd = sha2::Sha256::digest("111");
     let login_example = Login {
-        account: "123".to_string(),
+        account: "111".to_string(),
         password: pwd.as_slice().into(),
     };
     let res = login(&client, &url, &login_example).await;
@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 假设我们已经知道群组 ID
     let group_id =
-        shared::group::GroupId(Uuid::parse_str("019d7161ba5f72c08ba50d446f8cb201").unwrap());
+        shared::group::GroupId(Uuid::parse_str("019d7621e9ad7ba3aa7274e811ae6bd9").unwrap());
 
     let jg = JoinGroup { auth, group_id };
     let url = format!("https://{}/join_group", server_name);
@@ -97,4 +97,3 @@ async fn join_group(
     }
     bail!("cannot resolve response")
 }
-

@@ -2,7 +2,6 @@ use anyhow::bail;
 use reqwest::Client;
 use rustls::crypto::aws_lc_rs;
 use sha2::Digest;
-use shared::auth::Auth;
 use shared::group::CreateGroup;
 use shared::group::CreateGroupResponse;
 use shared::group::CreateGroupSuccess;
