@@ -3,10 +3,10 @@ use reqwest::Client;
 use rustls::crypto::aws_lc_rs;
 use sha2::Digest;
 use shared::auth::Auth;
+use shared::group::GroupError;
 use shared::group::ListGroups;
 use shared::group::ListGroupsResponse;
 use shared::group::ListGroupsSuccess;
-use shared::group::GroupError;
 use shared::login::*;
 use shared::serde_json;
 #[tokio::main]
@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
     let client_config = rustls::ClientConfig::builder()
         .with_root_certificates(root_cert_store)
         .with_no_client_auth();
-    let server_addr = std::env::var("SERVER_LOGIN_ADDR")?;
+    let server_addr = std::env::var("SERVER_HTTPS_ADDR")?;
     let server_name = std::env::var("SERVER_NAME")?;
 
     let client = reqwest::Client::builder()
@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
 
     let auth = res.unwrap().success().unwrap().auth;
 
-    let server_addr = std::env::var("SERVER_GROUP_ADDR")?;
+    let server_addr = std::env::var("SERVER_HTTPS_ADDR")?;
     let server_name = std::env::var("SERVER_NAME")?;
 
     let g_client = reqwest::Client::builder()
@@ -50,9 +50,7 @@ async fn main() -> anyhow::Result<()> {
         .no_proxy()
         .build()?;
 
-    let lg = ListGroups {
-        auth,
-    };
+    let lg = ListGroups { auth };
     let url = format!("https://{}/list_groups", server_name);
     let r = list_groups(&g_client, &url, &lg).await;
     dbg!(&r);
@@ -95,3 +93,4 @@ async fn list_groups(
     }
     bail!("cannot resolve response")
 }
+

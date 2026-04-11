@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
     let client_config = rustls::ClientConfig::builder()
         .with_root_certificates(root_cert_store)
         .with_no_client_auth();
-    let server_addr = std::env::var("SERVER_LOGIN_ADDR")?;
+    let server_addr = std::env::var("SERVER_HTTPS_ADDR")?;
     let server_name = std::env::var("SERVER_NAME")?;
 
     let client = reqwest::Client::builder()
