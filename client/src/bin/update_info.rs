@@ -1,6 +1,9 @@
 use anyhow::bail;
 use reqwest::Client;
 use rustls::crypto::aws_lc_rs;
+use sea_orm::Database;
+use sea_orm::DatabaseConnection;
+use sea_orm::TransactionTrait;
 use sha2::Digest;
 use shared::login::*;
 use shared::serde_json;
@@ -14,6 +17,10 @@ async fn main() -> anyhow::Result<()> {
     aws_lc_rs::default_provider()
         .install_default()
         .expect("unable to set aws_lc_rs as provider");
+
+    //准备数据库
+    let server_db_url = std::env::var("SERVER_DATABASE")?;
+    let db = Database::connect(server_db_url).await?;
 
     let root_cert_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -94,4 +101,10 @@ async fn update_info(
         return Ok(UpdateInfoResponse::Fail(e));
     }
     bail!("cannot resolve response")
+}
+async fn save_to_db(db: &DatabaseConnection, nm: NewMessages) -> anyhow::Result<()> {
+    let txn = db.begin().await?;
+    //在事务内操作
+    txn.commit().await?;
+    Ok(())
 }
