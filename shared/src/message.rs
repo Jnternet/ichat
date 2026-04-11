@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{
     account::{AccountId, OtherUser, UserInfo},
@@ -59,6 +60,7 @@ impl C2S_Msg {
 #[allow(non_camel_case_types)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct S2C_Msg {
+    id: Uuid,
     sender: UserInfo,
     target: GroupId,
     msg: Msg,
@@ -66,8 +68,9 @@ pub struct S2C_Msg {
 }
 
 impl S2C_Msg {
-    pub fn new(sender: UserInfo, msg: Msg, target: GroupId, time: DateTime<Utc>) -> Self {
+    pub fn new(id: Uuid, sender: UserInfo, msg: Msg, target: GroupId, time: DateTime<Utc>) -> Self {
         Self {
+            id,
             sender,
             msg,
             target,
@@ -80,6 +83,9 @@ impl S2C_Msg {
 
     pub fn msg(&self) -> &Msg {
         &self.msg
+    }
+    pub fn msg_id(&self) -> Uuid {
+        self.id
     }
     pub fn sender_name(&self) -> &str {
         self.sender.user_name()

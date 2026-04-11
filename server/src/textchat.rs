@@ -184,7 +184,7 @@ async fn handle_rh(
         let msg = serde_json::from_slice::<C2S_Msg>(&buf)?;
         // buf.clear();
         //保存到数据库
-        save_msg(&db, msg.clone()).await?;
+        let m = save_msg(&db, msg.clone()).await?;
         let sender_id = msg.auth().account_id();
         let sender_name = Accounts::find_by_id(sender_id)
             .one(&db)
@@ -192,6 +192,7 @@ async fn handle_rh(
             .unwrap()
             .user_name;
         let s2c = S2C_Msg::new(
+            m.uuid,
             UserInfo::new(sender_id, &sender_name),
             msg.msg().to_owned(),
             *msg.target(),

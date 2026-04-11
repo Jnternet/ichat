@@ -18,7 +18,10 @@ const MAX_MESSAGE_LENGTH: usize = 1000;
 /// - `Err(MessageError::NoPermission)`: 权限验证失败
 /// - `Err(MessageError::GroupNotFound)`: 目标群组不存在
 /// - `Err(MessageError::UnKnown)`: 其他未知错误
-pub async fn save_msg(db: &impl ConnectionTrait, msg: C2S_Msg) -> Result<(), MessageError> {
+pub async fn save_msg(
+    db: &impl ConnectionTrait,
+    msg: C2S_Msg,
+) -> Result<messages::Model, MessageError> {
     // 1. 验证 token
     if !auth::auth(db, msg.auth()).await {
         return Err(MessageError::NoPermission);
@@ -47,9 +50,7 @@ pub async fn save_msg(db: &impl ConnectionTrait, msg: C2S_Msg) -> Result<(), Mes
         create_at: Set(msg.time()),
     };
 
-    new_message.insert(db).await.map_err(anyhow::Error::from)?;
-
-    Ok(())
+    Ok(new_message.insert(db).await.map_err(anyhow::Error::from)?)
 }
 
 /// 验证消息的函数

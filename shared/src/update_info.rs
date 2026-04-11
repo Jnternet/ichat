@@ -27,6 +27,14 @@ impl NewMessages {
             messages,
         }
     }
+
+    pub fn messages(&self) -> &Vec<S2C_Msg> {
+        &self.messages
+    }
+
+    pub fn last_known(&self) -> &DateTime<Utc> {
+        &self.last_known
+    }
 }
 
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
@@ -43,4 +51,15 @@ pub enum UpdateInfoError {
 pub enum UpdateInfoResponse {
     Success(NewMessages),
     Fail(UpdateInfoError),
+}
+impl UpdateInfoResponse {
+    pub fn success(self) -> Option<NewMessages> {
+        match self {
+            Self::Success(s) => Some(s),
+            Self::Fail(e) => {
+                dbg!(&e);
+                None
+            }
+        }
+    }
 }

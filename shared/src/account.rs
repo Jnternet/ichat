@@ -34,4 +34,7 @@ impl UserInfo {
     pub fn user_name(&self) -> &str {
         &self.user_name
     }
+    pub fn id(&self) -> Uuid {
+        self.account_id.0
+    }
 }

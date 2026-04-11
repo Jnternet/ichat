@@ -11,6 +11,7 @@ pub struct Model {
     pub content: String,
     pub account_uuid: Uuid,
     pub group_uuid: Uuid,
+    pub create_at: DateTimeUtc,
     #[sea_orm(
         belongs_to,
         from = "account_uuid",

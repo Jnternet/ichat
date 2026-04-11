@@ -101,7 +101,7 @@ pub async fn get_new_messages(
             None => Utc::now(),
         };
 
-        let s2c_msg = S2C_Msg::new(user_info, msg_content, group_id, timestamp);
+        let s2c_msg = S2C_Msg::new(msg.uuid, user_info, msg_content, group_id, timestamp);
 
         s2c_messages.push(s2c_msg);
     }

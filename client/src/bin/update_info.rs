@@ -1,6 +1,8 @@
 use anyhow::bail;
 use reqwest::Client;
 use rustls::crypto::aws_lc_rs;
+use sea_orm::ActiveModelTrait;
+use sea_orm::ColumnTrait;
 use sea_orm::Database;
 use sea_orm::DatabaseConnection;
 use sea_orm::TransactionTrait;
@@ -19,8 +21,8 @@ async fn main() -> anyhow::Result<()> {
         .expect("unable to set aws_lc_rs as provider");
 
     //准备数据库
-    let server_db_url = std::env::var("SERVER_DATABASE")?;
-    let db = Database::connect(server_db_url).await?;
+    let client_db_url = std::env::var("CLIENT_DATABASE")?;
+    let db = Database::connect(client_db_url).await?;
 
     let root_cert_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -55,14 +57,15 @@ async fn main() -> anyhow::Result<()> {
         .tls_backend_preconfigured(client_config.clone())
         .no_proxy()
         .build()?;
+    let gu = get_last_message_timestamp(&db, auth).await?;
+    dbg!(&gu);
 
-    let gu = GetUpdate {
-        auth,
-        last_known: Some("2026-04-11T07:30:57.649111800+00:00".parse()?),
-    };
     let url = format!("https://{}/update_info", server_name);
     let r = update_info(&g_client, &url, &gu).await;
     dbg!(&r);
+
+    let nm = r.unwrap().success().unwrap();
+    save_to_db(&db, nm).await?;
 
     std::thread::park();
     anyhow::Ok(())
@@ -104,7 +107,59 @@ async fn update_info(
 }
 async fn save_to_db(db: &DatabaseConnection, nm: NewMessages) -> anyhow::Result<()> {
     let txn = db.begin().await?;
-    //在事务内操作
+
+    // 遍历所有消息并保存到数据库
+    for msg in nm.messages() {
+        // 构建消息模型
+        let new_message = client::entity::messages::ActiveModel {
+            uuid: sea_orm::Set(msg.msg_id()),
+            content: sea_orm::Set(msg.msg().text().to_string()),
+            account_uuid: sea_orm::Set(msg.sender().id()),
+            group_uuid: sea_orm::Set(msg.target().0),
+            create_at: sea_orm::Set(*msg.time()),
+        };
+
+        // 插入消息
+        new_message
+            .insert(&txn)
+            .await
+            .map_err(anyhow::Error::from)?;
+    }
+
     txn.commit().await?;
     Ok(())
+}
+
+/// 从数据库中查询当前用户最后一条信息的时间戳
+///
+/// # 参数
+/// - `db`: 数据库连接
+/// - `auth`: 用户认证信息
+///
+/// # 返回值
+/// - `Ok(GetUpdate)`: 包含用户认证信息和最后一条消息的时间戳
+/// - `Err(anyhow::Error)`: 数据库查询错误
+async fn get_last_message_timestamp(
+    db: &DatabaseConnection,
+    auth: shared::auth::Auth,
+) -> anyhow::Result<GetUpdate> {
+    use sea_orm::{EntityTrait, QueryFilter};
+
+    // 查询用户的最后一条消息
+    let last_message = client::entity::messages::Entity::find()
+        .filter(client::entity::messages::Column::AccountUuid.eq(auth.account_id()))
+        .order_by_id_desc()
+        .one(db)
+        .await
+        .map_err(anyhow::Error::from)?;
+    // match last_message {
+    //     Some(m) => Some(m.create_at),
+    //     None => None,
+    // }
+    dbg!(&last_message);
+    let last_known = last_message.map(|m| m.create_at);
+
+    // 构建 GetUpdate
+
+    Ok(GetUpdate { auth, last_known })
 }
