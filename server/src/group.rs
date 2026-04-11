@@ -2,7 +2,7 @@ use crate::auth;
 use crate::entity::{account_group, groups};
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     Set,
 };
 use shared::group::{
@@ -14,52 +14,13 @@ use shared::{auth::Auth, group::Group};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{Json, Router, routing::post};
-use axum_server::tls_rustls::RustlsConfig;
-use sea_orm::Database;
-use std::net::SocketAddr;
+use axum::{Json};
 
-pub async fn run() -> anyhow::Result<()> {
-    //准备数据库
-    let server_db_url = std::env::var("SERVER_DATABASE")?;
-    let db = Database::connect(server_db_url).await?;
-    //准备状态
-    let app_state = AppState { db };
-    // 你的路由
-    let app = Router::new()
-        .route(r"/create_group", post(route_create_group))
-        .route(r"/join_group", post(route_join_group))
-        .route(r"/exit_group", post(route_exit_group))
-        .route(r"/delete_group", post(route_delete_group))
-        .route(r"/list_groups", post(route_list_groups))
-        .route(r"/get_group", post(route_get_group))
-        .with_state(app_state);
-
-    // 載入證書與私鑰（PEM 格式）
-    // 正式環境請使用 Let's Encrypt 或其他正規憑證
-    let tls_config = RustlsConfig::from_pem_file(
-        "items/cert/fullchain.pem", // 憑證（通常包含中間憑證）
-        "items/cert/privkey.pem",   // 私鑰
-    )
-    .await?;
-
-    let addr = std::env::var("SERVER_GROUP_ADDR")?.parse::<SocketAddr>()?;
-
-    // 啟動 HTTPS 伺服器
-    axum_server::bind_rustls(addr, tls_config)
-        .serve(app.into_make_service())
-        .await?;
-
-    Ok(())
-}
-
-#[derive(Debug, Clone)]
-struct AppState {
-    db: DatabaseConnection,
-}
+// 从 axum 模块导入 AppState
+use crate::axum::AppState;
 
 #[axum::debug_handler]
-async fn route_create_group(
+pub async fn route_create_group(
     State(state): State<AppState>,
     Json(cg): Json<CreateGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
@@ -89,7 +50,7 @@ pub async fn create_group(db: &impl ConnectionTrait, group: CreateGroup) -> Resu
 }
 
 #[axum::debug_handler]
-async fn route_join_group(
+pub async fn route_join_group(
     State(state): State<AppState>,
     Json(jg): Json<JoinGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
@@ -145,7 +106,7 @@ pub async fn join_group(db: &impl ConnectionTrait, jg: JoinGroup) -> Result<(), 
     Ok(())
 }
 #[axum::debug_handler]
-async fn route_exit_group(
+pub async fn route_exit_group(
     State(state): State<AppState>,
     Json(eg): Json<ExitGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
@@ -199,7 +160,7 @@ pub async fn exit_group(db: &impl ConnectionTrait, eg: ExitGroup) -> Result<(), 
 }
 
 #[axum::debug_handler]
-async fn route_delete_group(
+pub async fn route_delete_group(
     State(state): State<AppState>,
     Json(dg): Json<DeleteGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
@@ -238,7 +199,7 @@ pub async fn delete_group(db: &impl ConnectionTrait, dg: DeleteGroup) -> Result<
 }
 
 #[axum::debug_handler]
-async fn route_list_groups(
+pub async fn route_list_groups(
     State(state): State<AppState>,
     Json(lg): Json<ListGroups>,
 ) -> Result<impl IntoResponse, GroupError> {
@@ -283,7 +244,7 @@ pub async fn list_groups(
 }
 
 #[axum::debug_handler]
-async fn route_get_group(
+pub async fn route_get_group(
     State(state): State<AppState>,
     Json(gg): Json<GetGroup>,
 ) -> Result<impl IntoResponse, GroupError> {

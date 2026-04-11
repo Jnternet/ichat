@@ -1,52 +1,29 @@
-use migration::MigratorTrait;
+use anyhow::Result;
 use rustls::crypto::aws_lc_rs;
-use sea_orm::Database;
-use std::thread::park;
-
-mod auth;
-mod entity;
-mod group;
-mod login;
-mod message;
-mod register;
-mod textchat;
+use server::axum;
+use server::textchat;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    //为rustls选择provider
     aws_lc_rs::default_provider()
         .install_default()
-        .expect("Failed to install aws-lc-rs crypto provider");
-    //根据migration迁移数据库架构
-    let server_db_url = std::env::var("SERVER_DATABASE")?;
-    let db = Database::connect(server_db_url).await?;
-    migration::Migrator::up(&db, None).await?;
-    //只用于迁移架构
-    drop(db);
-
-    tokio::spawn(async move {
-        if let Err(e) = register::run().await {
-            dbg!(e);
+        .expect("unable to set aws_lc_rs as provider");
+    // 启动登录服务器
+    tokio::spawn(async {
+        if let Err(e) = axum::run_https_server().await {
+            dbg!(&e);
         }
     });
 
-    tokio::spawn(async move {
-        if let Err(e) = login::run().await {
-            dbg!(e);
-        }
-    });
-    tokio::spawn(async move {
-        if let Err(e) = group::run().await {
-            dbg!(e);
-        }
-    });
-
-    tokio::spawn(async move {
+    // 启动文本聊天服务器
+    tokio::spawn(async {
         if let Err(e) = textchat::run().await {
-            dbg!(e);
+            dbg!(&e);
         }
     });
-    park();
+
+    // 保持主线程运行
+    tokio::signal::ctrl_c().await?;
     Ok(())
 }

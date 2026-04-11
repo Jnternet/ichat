@@ -2,48 +2,20 @@ use crate::entity::accounts;
 use crate::entity::auths;
 use crate::entity::prelude::*;
 use axum::extract::State;
-use axum::{Json, Router, response::IntoResponse, routing::post};
-use axum_server::tls_rustls::RustlsConfig;
+use axum::{Json, response::IntoResponse, routing::post};
 use sea_orm::ConnectionTrait;
 use sea_orm::EntityTrait;
 use sea_orm::QueryFilter;
-use sea_orm::{ActiveModelTrait, Database, Set};
-use sea_orm::{DatabaseConnection, TransactionTrait};
+use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{TransactionTrait};
 use shared::auth::Auth;
 use shared::login::*;
-use std::net::SocketAddr;
 
-pub async fn run() -> anyhow::Result<()> {
-    //准备数据库
-    let server_db_url = std::env::var("SERVER_DATABASE")?;
-    let db = Database::connect(server_db_url).await?;
-    //准备状态
-    let app_state = AppState { db };
-    // 你的路由
-    let app = Router::new()
-        .route(r"/login", post(login))
-        .with_state(app_state);
-
-    // 載入證書與私鑰（PEM 格式）
-    // 正式環境請使用 Let's Encrypt 或其他正規憑證
-    let tls_config = RustlsConfig::from_pem_file(
-        "items/cert/fullchain.pem", // 憑證（通常包含中間憑證）
-        "items/cert/privkey.pem",   // 私鑰
-    )
-    .await?;
-
-    let addr = std::env::var("SERVER_LOGIN_ADDR")?.parse::<SocketAddr>()?;
-
-    // 啟動 HTTPS 伺服器
-    axum_server::bind_rustls(addr, tls_config)
-        .serve(app.into_make_service())
-        .await?;
-
-    Ok(())
-}
+// 从 axum 模块导入 AppState
+use crate::axum::AppState;
 
 #[axum::debug_handler]
-async fn login(
+pub async fn login(
     State(state): State<AppState>,
     Json(login): Json<Login>,
 ) -> Result<impl IntoResponse, LoginError> {
@@ -99,10 +71,6 @@ async fn _login(state: AppState, login: Login) -> anyhow::Result<impl IntoRespon
         auth: Auth::new(au.account, &au.token.to_string()),
     }))
 }
-#[derive(Debug, Clone)]
-struct AppState {
-    db: DatabaseConnection,
-}
 async fn remove_expired_token(
     db: &impl ConnectionTrait,
     account_id: &uuid::Uuid,
@@ -122,7 +90,7 @@ async fn remove_expired_token(
 }
 
 #[derive(Debug, thiserror::Error)]
-enum LoginError {
+pub enum LoginError {
     #[error("this account does not exist")]
     NotExist,
     #[error("WrongPassword")]

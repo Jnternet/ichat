@@ -1,47 +1,18 @@
 use crate::entity::{accounts, prelude::*};
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::{Json, Router, response::IntoResponse, routing::post};
-use axum_server::tls_rustls::RustlsConfig;
+use axum::{Json, response::IntoResponse, routing::post};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 use shared::register::{Register, RegisterSuccess};
-use std::net::SocketAddr;
 
-pub async fn run() -> anyhow::Result<()> {
-    //准备数据库
-    let server_db_url = std::env::var("SERVER_DATABASE")?;
-    let db = Database::connect(server_db_url).await?;
-
-    //准备状态
-    let app_state = AppState { db };
-    // 你的路由
-    let app = Router::new()
-        .route(r"/register", post(register))
-        .with_state(app_state);
-
-    // 載入證書與私鑰（PEM 格式）
-    // 正式環境請使用 Let's Encrypt 或其他正規憑證
-    let tls_config = RustlsConfig::from_pem_file(
-        "items/cert/fullchain.pem", // 憑證（通常包含中間憑證）
-        "items/cert/privkey.pem",   // 私鑰
-    )
-    .await?;
-
-    let addr = std::env::var("SERVER_REGISTER_ADDR")?.parse::<SocketAddr>()?;
-
-    // 啟動 HTTPS 伺服器
-    axum_server::bind_rustls(addr, tls_config)
-        .serve(app.into_make_service())
-        .await?;
-
-    Ok(())
-}
+// 从 axum 模块导入 AppState
+use crate::axum::AppState;
 
 #[axum::debug_handler]
-async fn register(
+pub async fn register(
     State(state): State<AppState>,
     Json(register): Json<Register>,
 ) -> Result<impl IntoResponse, RegisterError> {
@@ -82,13 +53,9 @@ async fn _register(state: AppState, register: Register) -> anyhow::Result<impl I
 
     Ok(Json(RegisterSuccess))
 }
-#[derive(Debug, Clone)]
-struct AppState {
-    db: DatabaseConnection,
-}
 
 #[derive(Debug, thiserror::Error)]
-enum RegisterError {
+pub enum RegisterError {
     #[error("this account is already existence")]
     AlreadyExist,
 }
