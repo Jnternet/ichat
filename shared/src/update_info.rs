@@ -11,6 +11,7 @@ pub struct GetUpdate {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NewMessages {
+    last_known: DateTime<Utc>,
     messages: Vec<S2C_Msg>,
 }
 
@@ -18,6 +19,8 @@ pub struct NewMessages {
 pub enum UpdateInfoError {
     #[error("this account has no permission")]
     NoPermission,
+    #[error("no message newer than last_known")]
+    NoNewMessage,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
