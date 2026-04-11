@@ -1,5 +1,7 @@
+use client::save_msg;
 use migration::prelude::Utc;
 use rustls::crypto::aws_lc_rs;
+use sea_orm::Database;
 use sha2::Digest;
 use shared::*;
 use std::io::{Write, stdin, stdout};
@@ -13,6 +15,10 @@ async fn main() -> anyhow::Result<()> {
     aws_lc_rs::default_provider()
         .install_default()
         .expect("unable to set aws_lc_rs as provider");
+
+    //准备数据库
+    let client_db_url = std::env::var("CLIENT_DATABASE")?;
+    let db = Database::connect(client_db_url).await?;
 
     // 1. 从命令行读取用户账号和密码
     println!("请输入账号：");
@@ -47,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
     // 6. 启动两个任务，分别处理消息的接收和发送
     let write_half = Arc::new(tokio::sync::Mutex::new(write_half));
     let write_half_clone = write_half.clone();
+    let db_ = db.clone();
 
     // 接收消息的任务
     tokio::spawn(async move {
@@ -58,6 +65,9 @@ async fn main() -> anyhow::Result<()> {
                     let msg = serde_json::from_slice::<shared::message::S2C_Msg>(&buf[..n]);
                     match msg {
                         Ok(s2c_msg) => {
+                            if save_msg(&db_, &s2c_msg).await.is_err() {
+                                break;
+                            };
                             println!(
                                 "\n[{}]: {}|来自群:{:?}",
                                 s2c_msg.sender_name(),
