@@ -10,6 +10,7 @@ pub struct Model {
     pub account_uuid: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub group_uuid: Uuid,
+    pub last_known: Option<DateTimeUtc>,
     #[sea_orm(
         belongs_to,
         from = "account_uuid",
