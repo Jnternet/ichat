@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::bail;
 use reqwest::Client;
 use rustls::crypto::aws_lc_rs;
@@ -5,8 +6,15 @@ use sea_orm::ActiveModelTrait;
 use sea_orm::ColumnTrait;
 use sea_orm::Database;
 use sea_orm::DatabaseConnection;
+use sea_orm::EntityTrait;
 use sea_orm::TransactionTrait;
+use sea_orm::prelude::DateTime;
 use sha2::Digest;
+use shared::auth::Auth;
+use shared::chrono;
+use shared::chrono::Utc;
+use shared::group::GetGroup;
+use shared::group::GroupId;
 use shared::login::*;
 use shared::serde_json;
 use shared::update_info::GetUpdate;
@@ -57,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         .tls_backend_preconfigured(client_config.clone())
         .no_proxy()
         .build()?;
-    let gu = get_last_message_timestamp(&db, auth).await?;
+    let gu = get_last_message_timestamp(&db, &auth).await?;
     dbg!(&gu);
 
     let url = format!("https://{}/update_info", server_name);
@@ -65,7 +73,8 @@ async fn main() -> anyhow::Result<()> {
     dbg!(&r);
 
     let nm = r.unwrap().success().unwrap();
-    save_to_db(&db, nm).await?;
+    let url = format!("https://{}/get_group", server_name);
+    save_to_db(&db, &client, &url, nm, &auth).await?;
 
     std::thread::park();
     anyhow::Ok(())
@@ -105,11 +114,61 @@ async fn update_info(
     }
     bail!("cannot resolve response")
 }
-async fn save_to_db(db: &DatabaseConnection, nm: NewMessages) -> anyhow::Result<()> {
+async fn save_to_db(
+    db: &DatabaseConnection,
+    client: &Client,
+    url: &str,
+    nm: NewMessages,
+    auth: &Auth,
+) -> anyhow::Result<()> {
     let txn = db.begin().await?;
 
     // 遍历所有消息并保存到数据库
     for msg in nm.messages() {
+        // 检查并创建用户记录
+        let account_id = msg.sender().id();
+        let account = client::entity::accounts::Entity::find_by_id(account_id)
+            .one(&txn)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        if account.is_none() {
+            // 创建用户记录
+            let new_account = client::entity::accounts::ActiveModel {
+                uuid: sea_orm::Set(account_id),
+                user_name: sea_orm::Set(msg.sender().user_name().to_string()),
+                account: sea_orm::Set(msg.sender().user_name().to_string()),
+            };
+            new_account
+                .insert(&txn)
+                .await
+                .map_err(anyhow::Error::from)?;
+        }
+
+        // 检查并创建群组记录
+        let group_id = msg.target().0;
+        let group = client::entity::groups::Entity::find_by_id(group_id)
+            .one(&txn)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        if group.is_none() {
+            let get_group = GetGroup {
+                auth: auth.clone(),
+                group_id: GroupId(group_id),
+            };
+            let g = client::get_group(client, url, &get_group).await?;
+            let g = g.success().context("Cannot get group info")?;
+
+            // 创建群组记录
+            let new_group = client::entity::groups::ActiveModel {
+                uuid: sea_orm::Set(group_id),
+                group_name: sea_orm::Set(g.group.name), // 使用群组 ID 作为名称
+            };
+            new_group.insert(&txn).await.map_err(anyhow::Error::from)?;
+        }
+
+        // 保存消息
         client::save_msg(&txn, msg).await?;
     }
 
@@ -128,7 +187,7 @@ async fn save_to_db(db: &DatabaseConnection, nm: NewMessages) -> anyhow::Result<
 /// - `Err(anyhow::Error)`: 数据库查询错误
 async fn get_last_message_timestamp(
     db: &DatabaseConnection,
-    auth: shared::auth::Auth,
+    auth: &shared::auth::Auth,
 ) -> anyhow::Result<GetUpdate> {
     use sea_orm::{EntityTrait, QueryFilter};
 
@@ -142,6 +201,7 @@ async fn get_last_message_timestamp(
     let last_known = last_message.map(|m| m.create_at);
 
     // 构建 GetUpdate
+    let auth = auth.clone();
 
     Ok(GetUpdate { auth, last_known })
 }

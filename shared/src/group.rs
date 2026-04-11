@@ -105,3 +105,14 @@ pub enum GetGroupResponse {
     Success(GetGroupSuccess),
     Fail(GroupError),
 }
+impl GetGroupResponse {
+    pub fn success(self) -> Option<GetGroupSuccess> {
+        match self {
+            Self::Success(s) => Some(s),
+            Self::Fail(e) => {
+                dbg!(&e);
+                None
+            }
+        }
+    }
+}
