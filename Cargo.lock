@@ -703,6 +703,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "client_migration",
  "dotenv",
  "hex",
  "reqwest",
@@ -715,6 +716,14 @@ dependencies = [
  "tokio-rustls",
  "uuid",
  "webpki-roots 1.0.6",
+]
+
+[[package]]
+name = "client_migration"
+version = "0.1.0"
+dependencies = [
+ "sea-orm-migration",
+ "tokio",
 ]
 
 [[package]]

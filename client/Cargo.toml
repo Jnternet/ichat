@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 shared = { path = "../shared" }
+client_migration = {path = "migration"}
 
 anyhow = "1.0.102"
 bytes = "1.11.1"
