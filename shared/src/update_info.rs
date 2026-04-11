@@ -5,8 +5,8 @@ use crate::{auth::Auth, message::S2C_Msg};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GetUpdate {
-    auth: Auth,
-    last_known: Option<DateTime<Utc>>,
+    pub auth: Auth,
+    pub last_known: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
