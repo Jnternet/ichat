@@ -44,6 +44,7 @@ pub async fn save_msg(db: &impl ConnectionTrait, msg: C2S_Msg) -> Result<(), Mes
         content: Set(msg.msg().text().to_string()),
         account_uuid: Set(msg.auth().account_id()),
         group_uuid: Set(msg.target().0),
+        create_at: Set(msg.time()),
     };
 
     new_message.insert(db).await.map_err(anyhow::Error::from)?;
