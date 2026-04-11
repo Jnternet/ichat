@@ -1,8 +1,14 @@
 use crate::auth;
 use crate::entity::{account_group, groups};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
-use shared::group::{CreateGroup, CreateGroupSuccess, GroupId, JoinGroup, JoinGroupSuccess, ExitGroup, ExitGroupSuccess, DeleteGroup, DeleteGroupSuccess, ListGroups, ListGroupsSuccess, GetGroup, GetGroupSuccess};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
+};
+use shared::group::{
+    CreateGroup, CreateGroupSuccess, DeleteGroup, DeleteGroupSuccess, ExitGroup, ExitGroupSuccess,
+    GetGroup, GetGroupSuccess, GroupId, JoinGroup, JoinGroupSuccess, ListGroups, ListGroupsSuccess,
+};
 use shared::{auth::Auth, group::Group};
 
 use axum::extract::State;
@@ -94,10 +100,7 @@ async fn route_join_group(
     }
     Ok(Json(JoinGroupSuccess))
 }
-pub async fn join_group(
-    db: &impl ConnectionTrait,
-    jg: JoinGroup,
-) -> Result<(), GroupError> {
+pub async fn join_group(db: &impl ConnectionTrait, jg: JoinGroup) -> Result<(), GroupError> {
     let auth = jg.auth;
     let group_id = jg.group_id;
     // 1. 验证 token
@@ -132,6 +135,7 @@ pub async fn join_group(
     let new_account_group = account_group::ActiveModel {
         account_uuid: Set(auth.account_id()),
         group_uuid: Set(group_id.0),
+        ..Default::default()
     };
 
     new_account_group
@@ -152,10 +156,7 @@ async fn route_exit_group(
     }
     Ok(Json(ExitGroupSuccess))
 }
-pub async fn exit_group(
-    db: &impl ConnectionTrait,
-    eg: ExitGroup,
-) -> Result<(), GroupError> {
+pub async fn exit_group(db: &impl ConnectionTrait, eg: ExitGroup) -> Result<(), GroupError> {
     let auth = eg.auth;
     let group_id = eg.group_id;
     // 1. 验证 token
@@ -209,10 +210,7 @@ async fn route_delete_group(
     }
     Ok(Json(DeleteGroupSuccess))
 }
-pub async fn delete_group(
-    db: &impl ConnectionTrait,
-    dg: DeleteGroup,
-) -> Result<(), GroupError> {
+pub async fn delete_group(db: &impl ConnectionTrait, dg: DeleteGroup) -> Result<(), GroupError> {
     let auth = dg.auth;
     let group_id = dg.group_id;
     // 1. 验证 token
@@ -293,10 +291,7 @@ async fn route_get_group(
     let group = get_group(&db, gg).await?;
     Ok(Json(GetGroupSuccess { group }))
 }
-pub async fn get_group(
-    db: &impl ConnectionTrait,
-    gg: GetGroup,
-) -> Result<Group, GroupError> {
+pub async fn get_group(db: &impl ConnectionTrait, gg: GetGroup) -> Result<Group, GroupError> {
     let auth = gg.auth;
     let group_id = gg.group_id;
     // 1. 验证 token
