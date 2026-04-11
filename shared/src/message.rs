@@ -87,4 +87,7 @@ impl S2C_Msg {
     pub fn target(&self) -> &GroupId {
         &self.target
     }
+    pub fn time(&self) -> &DateTime<Utc> {
+        &self.time
+    }
 }

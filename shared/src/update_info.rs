@@ -15,6 +15,15 @@ pub struct NewMessages {
     messages: Vec<S2C_Msg>,
 }
 
+impl NewMessages {
+    pub fn new(last_known: DateTime<Utc>, messages: Vec<S2C_Msg>) -> Self {
+        Self {
+            last_known,
+            messages,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum UpdateInfoError {
     #[error("this account has no permission")]
