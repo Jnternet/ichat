@@ -1,13 +1,36 @@
 use crate::auth;
+use crate::axum::AppState;
 use crate::entity::{account_group, accounts, messages};
 use anyhow;
+use axum::Json;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use chrono::{DateTime, Utc};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, RelationTrait};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use shared::account::UserInfo;
 use shared::group::GroupId;
 use shared::message::Msg;
 use shared::message::S2C_Msg;
 use shared::update_info::{GetUpdate, NewMessages};
+
+#[axum::debug_handler]
+pub async fn update_info(
+    State(state): State<AppState>,
+    Json(get_update): Json<GetUpdate>,
+) -> Result<impl IntoResponse, UpdateInfoError> {
+    let db = state.db;
+    match get_new_messages(&db, get_update).await {
+        Ok(o) => Ok(Json(o)),
+        Err(e) => match e.downcast::<UpdateInfoError>() {
+            Ok(o) => Err(o),
+            Err(e) => {
+                dbg!(&e);
+                Err(UpdateInfoError::ServerError)
+            }
+        },
+    }
+}
 
 pub async fn get_new_messages(
     db: &impl ConnectionTrait,
@@ -39,11 +62,11 @@ pub async fn get_new_messages(
     if let Some(last_time) = last_known {
         // 假设 messages 表中有时间戳字段
         // 这里需要根据实际的数据库结构进行调整
-        // message_query = message_query.filter(messages::Column::CreateAt.gt(last_time));
+        message_query = message_query.filter(messages::Column::CreateAt.gt(last_time));
     }
 
     // 6. 对消息按照时间顺序排序（降序）
-    // message_query = message_query.order_by_desc(messages::Column::CreateAt);
+    message_query = message_query.order_by_desc(messages::Column::CreateAt);
 
     // 7. 执行查询
     let messages = message_query.all(db).await.map_err(anyhow::Error::from)?;
@@ -90,4 +113,36 @@ pub async fn get_new_messages(
     let new_messages = NewMessages::new(Utc::now(), s2c_messages);
 
     Ok(new_messages)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum UpdateInfoError {
+    #[error("this account has no permission")]
+    NoPermission,
+    #[error("no message newer than last_known")]
+    NoNewMessage,
+    #[error("ServerError")]
+    ServerError,
+}
+
+impl IntoResponse for UpdateInfoError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::NoPermission => (
+                StatusCode::BAD_REQUEST,
+                Json(shared::update_info::UpdateInfoError::NoPermission),
+            )
+                .into_response(),
+            Self::NoNewMessage => (
+                StatusCode::BAD_REQUEST,
+                Json(shared::update_info::UpdateInfoError::NoNewMessage),
+            )
+                .into_response(),
+            Self::ServerError => (
+                StatusCode::BAD_REQUEST,
+                Json(shared::update_info::UpdateInfoError::ServerError),
+            )
+                .into_response(),
+        }
+    }
 }

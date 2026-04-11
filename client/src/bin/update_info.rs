@@ -2,12 +2,12 @@ use anyhow::bail;
 use reqwest::Client;
 use rustls::crypto::aws_lc_rs;
 use sha2::Digest;
-use shared::group::CreateGroup;
-use shared::group::CreateGroupResponse;
-use shared::group::CreateGroupSuccess;
-use shared::group::GroupError;
 use shared::login::*;
 use shared::serde_json;
+use shared::update_info::GetUpdate;
+use shared::update_info::NewMessages;
+use shared::update_info::UpdateInfoError;
+use shared::update_info::UpdateInfoResponse;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
@@ -49,12 +49,12 @@ async fn main() -> anyhow::Result<()> {
         .no_proxy()
         .build()?;
 
-    let cg = CreateGroup {
+    let gu = GetUpdate {
         auth,
-        name: "first_group".to_string(),
+        last_known: Some("2026-04-11T07:30:57.649111800+00:00".parse()?),
     };
-    let url = format!("https://{}/create_group", server_name);
-    let r = create_group(&g_client, &url, &cg).await;
+    let url = format!("https://{}/update_info", server_name);
+    let r = update_info(&g_client, &url, &gu).await;
     dbg!(&r);
 
     std::thread::park();
@@ -73,25 +73,25 @@ async fn login(client: &Client, url: &str, login: &Login) -> anyhow::Result<Logi
     bail!("cannot resolve response")
 }
 
-async fn create_group(
+async fn update_info(
     client: &Client,
     url: &str,
-    create_group: &CreateGroup,
-) -> anyhow::Result<CreateGroupResponse> {
+    get_update: &GetUpdate,
+) -> anyhow::Result<UpdateInfoResponse> {
     let text = client
         .post(url)
-        .json(create_group)
+        .json(get_update)
         .send()
         .await?
         .text()
         .await?;
-    let result = serde_json::from_str::<CreateGroupSuccess>(&text);
+    let result = serde_json::from_str::<NewMessages>(&text);
     if let Ok(s) = result {
-        return Ok(CreateGroupResponse::Success(s));
+        return Ok(UpdateInfoResponse::Success(s));
     }
-    let result = serde_json::from_str::<GroupError>(&text);
+    let result = serde_json::from_str::<UpdateInfoError>(&text);
     if let Ok(e) = result {
-        return Ok(CreateGroupResponse::Fail(e));
+        return Ok(UpdateInfoResponse::Fail(e));
     }
     bail!("cannot resolve response")
 }

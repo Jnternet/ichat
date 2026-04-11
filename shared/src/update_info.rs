@@ -8,6 +8,11 @@ pub struct GetUpdate {
     pub auth: Auth,
     pub last_known: Option<DateTime<Utc>>,
 }
+impl GetUpdate {
+    pub fn set_time(&mut self, time: DateTime<Utc>) {
+        self.last_known = Some(time)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NewMessages {
@@ -30,6 +35,8 @@ pub enum UpdateInfoError {
     NoPermission,
     #[error("no message newer than last_known")]
     NoNewMessage,
+    #[error("ServerError")]
+    ServerError,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -10,6 +10,7 @@ use crate::group::{
 };
 use crate::login::login;
 use crate::register::register;
+use crate::update_info::update_info;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -33,6 +34,7 @@ pub async fn run_https_server() -> anyhow::Result<()> {
         .route(r"/delete_group", post(route_delete_group))
         .route(r"/list_groups", post(route_list_groups))
         .route(r"/get_group", post(route_get_group))
+        .route(r"/update_info", post(update_info))
         .with_state(app_state);
 
     // 載入證書與私鑰（PEM 格式）
