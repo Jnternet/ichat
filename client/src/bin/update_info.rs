@@ -169,7 +169,10 @@ async fn save_to_db(
         }
 
         // 保存消息
-        client::save_msg(&txn, msg).await?;
+        let r = client::save_msg(&txn, msg).await;
+        if r.is_err() {
+            dbg!(&r);
+        }
     }
 
     txn.commit().await?;
