@@ -3,6 +3,7 @@ pub use sea_orm_migration::prelude::*;
 mod m20220101_000001_create_table;
 mod m20260402_080713_create_auths;
 mod m20260403_114824_create_group_msg;
+mod m20260411_040444_alter_account_group;
 
 pub struct Migrator;
 
@@ -13,6 +14,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20220101_000001_create_table::Migration),
             Box::new(m20260402_080713_create_auths::Migration),
             Box::new(m20260403_114824_create_group_msg::Migration),
+            Box::new(m20260411_040444_alter_account_group::Migration),
         ]
     }
 }
