@@ -110,20 +110,7 @@ async fn save_to_db(db: &DatabaseConnection, nm: NewMessages) -> anyhow::Result<
 
     // 遍历所有消息并保存到数据库
     for msg in nm.messages() {
-        // 构建消息模型
-        let new_message = client::entity::messages::ActiveModel {
-            uuid: sea_orm::Set(msg.msg_id()),
-            content: sea_orm::Set(msg.msg().text().to_string()),
-            account_uuid: sea_orm::Set(msg.sender().id()),
-            group_uuid: sea_orm::Set(msg.target().0),
-            create_at: sea_orm::Set(*msg.time()),
-        };
-
-        // 插入消息
-        new_message
-            .insert(&txn)
-            .await
-            .map_err(anyhow::Error::from)?;
+        client::save_msg(&txn, msg).await?;
     }
 
     txn.commit().await?;
@@ -152,11 +139,6 @@ async fn get_last_message_timestamp(
         .one(db)
         .await
         .map_err(anyhow::Error::from)?;
-    // match last_message {
-    //     Some(m) => Some(m.create_at),
-    //     None => None,
-    // }
-    dbg!(&last_message);
     let last_known = last_message.map(|m| m.create_at);
 
     // 构建 GetUpdate
