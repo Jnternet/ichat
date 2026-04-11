@@ -3240,6 +3240,7 @@ dependencies = [
 name = "shared"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "rkyv 0.8.15",
  "serde",
  "serde_json",

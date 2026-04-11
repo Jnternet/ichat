@@ -8,3 +8,4 @@ pub mod group;
 pub mod login;
 pub mod message;
 pub mod register;
+pub mod update_info;

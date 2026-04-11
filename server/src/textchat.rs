@@ -10,6 +10,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sea_orm::QueryFilter;
 use sea_orm::{Database, DatabaseConnection, EntityTrait};
 use shared::account::OtherUser;
+use shared::account::UserInfo;
 use shared::auth::Auth;
 use shared::group::GroupId;
 use shared::message::{C2S_Msg, S2C_Msg};
@@ -191,9 +192,10 @@ async fn handle_rh(
             .unwrap()
             .user_name;
         let s2c = S2C_Msg::new(
-            OtherUser::new(sender_name),
+            UserInfo::new(sender_id, &sender_name),
             msg.msg().to_owned(),
             *msg.target(),
+            msg.time(),
         );
         //缩短持有锁的时间
         let gs = {

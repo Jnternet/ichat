@@ -1,3 +1,4 @@
+use migration::prelude::Utc;
 use rustls::crypto::aws_lc_rs;
 use sha2::Digest;
 use shared::*;
@@ -99,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             let msg = shared::message::Msg::new(input);
-            let c2s_msg = shared::message::C2S_Msg::new(auth.clone(), group_id, msg);
+            let c2s_msg = shared::message::C2S_Msg::new(auth.clone(), group_id, msg, Utc::now());
             let msg_json = serde_json::to_vec(&c2s_msg).unwrap();
 
             let mut write_half = write_half_clone.lock().await;
