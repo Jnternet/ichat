@@ -7,16 +7,16 @@ pub struct Register {
     pub password: Vec<u8>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RegisterSuccess;
 
-#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, thiserror::Error, Serialize, Deserialize, Clone)]
 pub enum RegisterError {
     #[error("this account is already existence")]
     AlreadyExist,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum RegisterResponse {
     Success(RegisterSuccess),
     Fail(RegisterError),

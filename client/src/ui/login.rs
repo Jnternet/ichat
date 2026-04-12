@@ -4,7 +4,8 @@ use reqwest::Client;
 use sea_orm::{Database, DatabaseConnection};
 use sha2::Digest;
 use shared::auth::Auth;
-use shared::login::LoginResponse;
+use shared::login::{LoginResponse, Login as SharedLogin};
+use shared::register::{Register, RegisterResponse};
 
 pub fn run() -> iced::Result {
     iced::application(Login::default, Login::update, Login::view)
@@ -16,8 +17,10 @@ struct Login {
     inner: Inner,
     view_state: ViewState,
     account: String,
+    username: String,
     password: String,
     confirm_password: String,
+    error: Option<String>,
 }
 struct Inner {
     auth: Option<Auth>,
@@ -35,6 +38,7 @@ enum ViewState {
 
 #[derive(Debug, Clone)]
 enum Message {
+    AccountChanged(String),
     UsernameChanged(String),
     PasswordChanged(String),
     ConfirmPasswordChanged(String),
@@ -42,30 +46,49 @@ enum Message {
     SubmitLogin,
     SubmitRegister,
     LoginResponse(LoginResponse),
+    RegisterResponse(RegisterResponse),
 }
 
 impl Login {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::UsernameChanged(u) => self.account = u,
-            Message::PasswordChanged(p) => self.password = p,
-            Message::ConfirmPasswordChanged(cp) => self.confirm_password = cp,
+            Message::AccountChanged(a) => {
+                self.account = a;
+                self.error = None;
+            }
+            Message::UsernameChanged(u) => {
+                self.username = u;
+                self.error = None;
+            }
+            Message::PasswordChanged(p) => {
+                self.password = p;
+                self.error = None;
+            }
+            Message::ConfirmPasswordChanged(cp) => {
+                self.confirm_password = cp;
+                self.error = None;
+            }
             Message::SwitchView(view) => {
                 self.view_state = view;
                 self.account.clear();
+                self.username.clear();
                 self.password.clear();
                 self.confirm_password.clear();
+                self.error = None;
             }
             Message::SubmitLogin => {
+                if self.account.is_empty() || self.password.is_empty() {
+                    self.error = Some("账号和密码不能为空".to_string());
+                    return Task::none();
+                }
+                
                 println!("正在尝试登录: {}", self.account);
-                // todo: 调用登录 API (例如: POST /api/v1/login)
-                // 如果使用 tokio, 可以在此处返回 Task::perform(api_call, Message::LoginResponse)
                 let url = format!("{}login", self.inner.url);
-                let l = shared::login::Login {
+                let l = SharedLogin {
                     account: self.account.clone(),
                     password: sha2::Sha256::digest(self.password.clone())
                         .as_slice()
-                        .into(),
+                        .to_vec(),
                 };
                 let c = self.inner.client.clone();
                 return Task::perform(
@@ -74,17 +97,61 @@ impl Login {
                 );
             }
             Message::SubmitRegister => {
-                if self.password == self.confirm_password {
-                    println!("正在尝试注册: {}", self.account);
-                    // todo: 调用注册 API (例如: POST /api/v1/register)
-                } else {
-                    println!("两次输入的密码不一致");
+                if self.account.is_empty() || self.username.is_empty() || self.password.is_empty() {
+                    self.error = Some("账号、用户名和密码不能为空".to_string());
+                    return Task::none();
                 }
+                
+                if self.password != self.confirm_password {
+                    self.error = Some("两次输入的密码不一致".to_string());
+                    return Task::none();
+                }
+                
+                println!("正在尝试注册: {}, 用户名: {}", self.account, self.username);
+                let url = format!("{}register", self.inner.url);
+                let r = Register {
+                    account: self.account.clone(),
+                    user_name: self.username.clone(),
+                    password: sha2::Sha256::digest(self.password.clone())
+                        .as_slice()
+                        .into(),
+                };
+                let c = self.inner.client.clone();
+                return Task::perform(
+                    async move { crate::tools::auth::register(&c, &url, &r).await.unwrap() },
+                    Message::RegisterResponse,
+                );
             }
             Message::LoginResponse(r) => {
-                let auth = r.success().unwrap().auth;
-                println!("login success!:{}", auth.token());
-                self.inner.auth = Some(auth);
+                match r {
+                    LoginResponse::Success(s) => {
+                        let auth = s.auth;
+                        println!("login success!: {}", auth.token());
+                        self.inner.auth = Some(auth);
+                    }
+                    LoginResponse::Fail(e) => {
+                        println!("login failed: {:?}", e);
+                        self.error = Some(format!("登录失败: {:?}", e));
+                    }
+                }
+            }
+            Message::RegisterResponse(r) => {
+                match r {
+                    RegisterResponse::Success(_) => {
+                        println!("register success!");
+                        // 注册成功后切换到登录页面
+                        self.view_state = ViewState::Login;
+                        self.account.clear();
+                        self.username.clear();
+                        self.password.clear();
+                        self.confirm_password.clear();
+                        self.error = Some("注册成功，请登录".to_string());
+                    }
+                    RegisterResponse::Fail(e) => {
+                        println!("register failed: {:?}", e);
+                        self.error = Some(format!("注册失败: {:?}", e));
+                    }
+                }
             }
         }
         Task::none()
@@ -97,19 +164,28 @@ impl Login {
         })
         .size(30);
 
-        let username_input = text_input("用户名", &self.account)
-            .on_input(Message::UsernameChanged)
+        let account_input = text_input("账号", &self.account)
+            .on_input(Message::AccountChanged)
             .padding(10);
+
+        let mut content = column![title, account_input]
+            .spacing(20)
+            .max_width(300)
+            .align_x(Alignment::Center);
+
+        if self.view_state == ViewState::Register {
+            let username_input = text_input("用户名", &self.username)
+                .on_input(Message::UsernameChanged)
+                .padding(10);
+            content = content.push(username_input);
+        }
 
         let password_input = text_input("密码", &self.password)
             .on_input(Message::PasswordChanged)
             .secure(true)
             .padding(10);
 
-        let mut content = column![title, username_input, password_input]
-            .spacing(20)
-            .max_width(300)
-            .align_x(Alignment::Center);
+        content = content.push(password_input);
 
         if self.view_state == ViewState::Register {
             content = content.push(
@@ -117,6 +193,13 @@ impl Login {
                     .on_input(Message::ConfirmPasswordChanged)
                     .secure(true)
                     .padding(10),
+            );
+        }
+
+        if let Some(error) = &self.error {
+            content = content.push(
+                text(error)
+                    .size(14)
             );
         }
 
@@ -192,8 +275,10 @@ impl Default for Login {
             inner,
             view_state: ViewState::Login,
             account: String::new(),
+            username: String::new(),
             password: String::new(),
             confirm_password: String::new(),
+            error: None,
         }
     }
 }
