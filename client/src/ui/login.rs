@@ -2,7 +2,9 @@ use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Task};
 use reqwest::Client;
 use sea_orm::{Database, DatabaseConnection};
+use sha2::Digest;
 use shared::auth::Auth;
+use shared::login::LoginResponse;
 
 pub fn run() -> iced::Result {
     iced::application(Login::default, Login::update, Login::view)
@@ -13,7 +15,7 @@ pub fn run() -> iced::Result {
 struct Login {
     inner: Inner,
     view_state: ViewState,
-    username: String,
+    account: String,
     password: String,
     confirm_password: String,
 }
@@ -21,6 +23,7 @@ struct Inner {
     auth: Option<Auth>,
     db: DatabaseConnection,
     client: Client,
+    url: String,
 }
 impl Default for Login {
     fn default() -> Self {
@@ -44,15 +47,19 @@ impl Default for Login {
             .no_proxy()
             .build()
             .unwrap();
+
+        let server_name = std::env::var("SERVER_NAME").unwrap();
+        let url = format!("https://{}/", server_name);
         let inner = Inner {
             auth: None,
             db,
             client,
+            url,
         };
         Self {
             inner,
             view_state: ViewState::Login,
-            username: String::new(),
+            account: String::new(),
             password: String::new(),
             confirm_password: String::new(),
         }
@@ -74,33 +81,50 @@ enum Message {
     SwitchView(ViewState),
     SubmitLogin,
     SubmitRegister,
+    LoginResponse(LoginResponse),
 }
 
 impl Login {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::UsernameChanged(u) => self.username = u,
+            Message::UsernameChanged(u) => self.account = u,
             Message::PasswordChanged(p) => self.password = p,
             Message::ConfirmPasswordChanged(cp) => self.confirm_password = cp,
             Message::SwitchView(view) => {
                 self.view_state = view;
-                self.username.clear();
+                self.account.clear();
                 self.password.clear();
                 self.confirm_password.clear();
             }
             Message::SubmitLogin => {
-                println!("正在尝试登录: {}", self.username);
+                println!("正在尝试登录: {}", self.account);
                 // todo: 调用登录 API (例如: POST /api/v1/login)
                 // 如果使用 tokio, 可以在此处返回 Task::perform(api_call, Message::LoginResponse)
+                let url = format!("{}login", self.inner.url);
+                let l = shared::login::Login {
+                    account: self.account.clone(),
+                    password: sha2::Sha256::digest(self.password.clone())
+                        .as_slice()
+                        .into(),
+                };
+                let c = self.inner.client.clone();
+                return Task::perform(
+                    async move { crate::tools::auth::login(&c, &url, &l).await.unwrap() },
+                    Message::LoginResponse,
+                );
             }
             Message::SubmitRegister => {
                 if self.password == self.confirm_password {
-                    println!("正在尝试注册: {}", self.username);
+                    println!("正在尝试注册: {}", self.account);
                     // todo: 调用注册 API (例如: POST /api/v1/register)
-                    // 需要处理 Argon2id 哈希和 Noise 协议握手初始化
                 } else {
                     println!("两次输入的密码不一致");
                 }
+            }
+            Message::LoginResponse(r) => {
+                let auth = r.success().unwrap().auth;
+                println!("login success!:{}", auth.token());
+                self.inner.auth = Some(auth);
             }
         }
         Task::none()
@@ -113,7 +137,7 @@ impl Login {
         })
         .size(30);
 
-        let username_input = text_input("用户名", &self.username)
+        let username_input = text_input("用户名", &self.account)
             .on_input(Message::UsernameChanged)
             .padding(10);
 

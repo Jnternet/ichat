@@ -8,12 +8,12 @@ pub struct Login {
     pub password: Vec<u8>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LoginSuccess {
     pub auth: Auth,
 }
 
-#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, thiserror::Error, Serialize, Deserialize, Clone)]
 pub enum LoginError {
     #[error("this account does not exist")]
     NotExist,
@@ -23,7 +23,7 @@ pub enum LoginError {
     ServerWrong,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum LoginResponse {
     Success(LoginSuccess),
     Fail(LoginError),
