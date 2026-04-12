@@ -25,46 +25,6 @@ struct Inner {
     client: Client,
     url: String,
 }
-impl Default for Login {
-    fn default() -> Self {
-        //准备数据库
-        let client_db_url = std::env::var("CLIENT_DATABASE").unwrap();
-        // let db = Database::connect(client_db_url).await.unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async { Database::connect(client_db_url).await.unwrap() });
-
-        let root_cert_store =
-            rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let client_config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_cert_store)
-            .with_no_client_auth();
-        let server_addr = std::env::var("SERVER_HTTPS_ADDR").unwrap();
-        let server_name = std::env::var("SERVER_NAME").unwrap();
-
-        let client = reqwest::Client::builder()
-            .resolve(&server_name, server_addr.parse().unwrap())
-            .tls_backend_preconfigured(client_config)
-            .no_proxy()
-            .build()
-            .unwrap();
-
-        let server_name = std::env::var("SERVER_NAME").unwrap();
-        let url = format!("https://{}/", server_name);
-        let inner = Inner {
-            auth: None,
-            db,
-            client,
-            url,
-        };
-        Self {
-            inner,
-            view_state: ViewState::Login,
-            account: String::new(),
-            password: String::new(),
-            confirm_password: String::new(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum ViewState {
@@ -195,5 +155,45 @@ impl Login {
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .into()
+    }
+}
+impl Default for Login {
+    fn default() -> Self {
+        //准备数据库
+        let client_db_url = std::env::var("CLIENT_DATABASE").unwrap();
+        // let db = Database::connect(client_db_url).await.unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(async { Database::connect(client_db_url).await.unwrap() });
+
+        let root_cert_store =
+            rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let client_config = rustls::ClientConfig::builder()
+            .with_root_certificates(root_cert_store)
+            .with_no_client_auth();
+        let server_addr = std::env::var("SERVER_HTTPS_ADDR").unwrap();
+        let server_name = std::env::var("SERVER_NAME").unwrap();
+
+        let client = reqwest::Client::builder()
+            .resolve(&server_name, server_addr.parse().unwrap())
+            .tls_backend_preconfigured(client_config)
+            .no_proxy()
+            .build()
+            .unwrap();
+
+        let server_name = std::env::var("SERVER_NAME").unwrap();
+        let url = format!("https://{}/", server_name);
+        let inner = Inner {
+            auth: None,
+            db,
+            client,
+            url,
+        };
+        Self {
+            inner,
+            view_state: ViewState::Login,
+            account: String::new(),
+            password: String::new(),
+            confirm_password: String::new(),
+        }
     }
 }
