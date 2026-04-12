@@ -4,7 +4,7 @@ use reqwest::Client;
 use sea_orm::{Database, DatabaseConnection};
 use sha2::Digest;
 use shared::auth::Auth;
-use shared::login::{LoginResponse, Login as SharedLogin};
+use shared::login::{Login as SharedLogin, LoginResponse};
 use shared::register::{Register, RegisterResponse};
 
 pub fn run() -> iced::Result {
@@ -81,7 +81,7 @@ impl Login {
                     self.error = Some("账号和密码不能为空".to_string());
                     return Task::none();
                 }
-                
+
                 println!("正在尝试登录: {}", self.account);
                 let url = format!("{}login", self.inner.url);
                 let l = SharedLogin {
@@ -101,12 +101,12 @@ impl Login {
                     self.error = Some("账号、用户名和密码不能为空".to_string());
                     return Task::none();
                 }
-                
+
                 if self.password != self.confirm_password {
                     self.error = Some("两次输入的密码不一致".to_string());
                     return Task::none();
                 }
-                
+
                 println!("正在尝试注册: {}, 用户名: {}", self.account, self.username);
                 let url = format!("{}register", self.inner.url);
                 let r = Register {
@@ -122,19 +122,17 @@ impl Login {
                     Message::RegisterResponse,
                 );
             }
-            Message::LoginResponse(r) => {
-                match r {
-                    LoginResponse::Success(s) => {
-                        let auth = s.auth;
-                        println!("login success!: {}", auth.token());
-                        self.inner.auth = Some(auth);
-                    }
-                    LoginResponse::Fail(e) => {
-                        println!("login failed: {:?}", e);
-                        self.error = Some(format!("登录失败: {:?}", e));
-                    }
+            Message::LoginResponse(r) => match r {
+                LoginResponse::Success(s) => {
+                    let auth = s.auth;
+                    println!("login success!: {}", auth.token());
+                    self.inner.auth = Some(auth);
                 }
-            }
+                LoginResponse::Fail(e) => {
+                    println!("login failed: {:?}", e);
+                    self.error = Some(format!("登录失败: {:?}", e));
+                }
+            },
             Message::RegisterResponse(r) => {
                 match r {
                     RegisterResponse::Success(_) => {
@@ -197,10 +195,7 @@ impl Login {
         }
 
         if let Some(error) = &self.error {
-            content = content.push(
-                text(error)
-                    .size(14)
-            );
+            content = content.push(text(error).size(14));
         }
 
         let submit_button = match self.view_state {
