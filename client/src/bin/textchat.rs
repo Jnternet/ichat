@@ -1,4 +1,4 @@
-use client::save_msg;
+use client::tools::update_info::save_msg;
 use migration::prelude::Utc;
 use rustls::crypto::aws_lc_rs;
 use sea_orm::Database;
