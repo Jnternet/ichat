@@ -156,20 +156,17 @@ impl Login {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let mut content = column![]
+            .spacing(20)
+            .max_width(300)
+            .align_x(Alignment::Center);
+
         let title = text(match self.view_state {
             ViewState::Login => "欢迎回来",
             ViewState::Register => "创建新账户",
         })
         .size(30);
-
-        let account_input = text_input("账号", &self.account)
-            .on_input(Message::AccountChanged)
-            .padding(10);
-
-        let mut content = column![title, account_input]
-            .spacing(20)
-            .max_width(300)
-            .align_x(Alignment::Center);
+        content = content.push(title);
 
         if self.view_state == ViewState::Register {
             let username_input = text_input("用户名", &self.username)
@@ -177,6 +174,12 @@ impl Login {
                 .padding(10);
             content = content.push(username_input);
         }
+
+        let account_input = text_input("账号", &self.account)
+            .on_input(Message::AccountChanged)
+            .padding(10);
+
+        content = content.push(account_input);
 
         let password_input = text_input("密码", &self.password)
             .on_input(Message::PasswordChanged)
