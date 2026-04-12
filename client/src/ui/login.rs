@@ -2,6 +2,7 @@ use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Task};
 use reqwest::Client;
 use sea_orm::{Database, DatabaseConnection};
+use shared::auth::Auth;
 
 pub fn run() -> iced::Result {
     iced::application(Login::default, Login::update, Login::view)
@@ -17,6 +18,7 @@ struct Login {
     confirm_password: String,
 }
 struct Inner {
+    auth: Option<Auth>,
     db: DatabaseConnection,
     client: Client,
 }
@@ -42,7 +44,11 @@ impl Default for Login {
             .no_proxy()
             .build()
             .unwrap();
-        let inner = Inner { db, client };
+        let inner = Inner {
+            auth: None,
+            db,
+            client,
+        };
         Self {
             inner,
             view_state: ViewState::Login,
