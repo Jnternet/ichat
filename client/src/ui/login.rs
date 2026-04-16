@@ -7,7 +7,7 @@ use shared::login::{Login as SharedLogin, LoginResponse};
 use shared::register::{Register, RegisterResponse};
 
 pub struct Login {
-    inner: Inner,
+    pub inner: Inner,
     view_state: ViewState,
     account: String,
     username: String,
@@ -15,10 +15,10 @@ pub struct Login {
     confirm_password: String,
     error: Option<String>,
 }
-struct Inner {
-    auth: Option<Auth>,
-    client: Client,
-    url: String,
+pub struct Inner {
+    pub auth: Option<Auth>,
+    pub client: Client,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -40,9 +40,14 @@ pub enum Message {
     LoginResponse(LoginResponse),
     RegisterResponse(RegisterResponse),
 }
+pub enum Action {
+    None,
+    Run(Task<Message>),
+    ChangeToChat,
+}
 
 impl Login {
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Action {
         match message {
             Message::AccountChanged(a) => {
                 self.account = a;
@@ -71,7 +76,7 @@ impl Login {
             Message::SubmitLogin => {
                 if self.account.is_empty() || self.password.is_empty() {
                     self.error = Some("账号和密码不能为空".to_string());
-                    return Task::none();
+                    return Action::None;
                 }
 
                 println!("正在尝试登录: {}", self.account);
@@ -83,20 +88,20 @@ impl Login {
                         .to_vec(),
                 };
                 let c = self.inner.client.clone();
-                return Task::perform(
+                return Action::Run(Task::perform(
                     async move { crate::tools::auth::login(&c, &url, &l).await.unwrap() },
                     Message::LoginResponse,
-                );
+                ));
             }
             Message::SubmitRegister => {
                 if self.account.is_empty() || self.username.is_empty() || self.password.is_empty() {
                     self.error = Some("账号、用户名和密码不能为空".to_string());
-                    return Task::none();
+                    return Action::None;
                 }
 
                 if self.password != self.confirm_password {
                     self.error = Some("两次输入的密码不一致".to_string());
-                    return Task::none();
+                    return Action::None;
                 }
 
                 println!("正在尝试注册: {}, 用户名: {}", self.account, self.username);
@@ -109,16 +114,17 @@ impl Login {
                         .into(),
                 };
                 let c = self.inner.client.clone();
-                return Task::perform(
+                return Action::Run(Task::perform(
                     async move { crate::tools::auth::register(&c, &url, &r).await.unwrap() },
                     Message::RegisterResponse,
-                );
+                ));
             }
             Message::LoginResponse(r) => match r {
                 LoginResponse::Success(s) => {
                     let auth = s.auth;
                     println!("login success!: {}", auth.token());
                     self.inner.auth = Some(auth);
+                    return Action::ChangeToChat;
                 }
                 LoginResponse::Fail(e) => {
                     println!("login failed: {:?}", e);
@@ -144,7 +150,7 @@ impl Login {
                 }
             }
         }
-        Task::none()
+        Action::None
     }
 
     pub fn view(&self) -> Element<'_, Message> {
