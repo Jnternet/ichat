@@ -1,19 +1,12 @@
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Task};
 use reqwest::Client;
-use sea_orm::{Database, DatabaseConnection};
 use sha2::Digest;
 use shared::auth::Auth;
 use shared::login::{Login as SharedLogin, LoginResponse};
 use shared::register::{Register, RegisterResponse};
 
-pub fn run() -> iced::Result {
-    iced::application(Login::default, Login::update, Login::view)
-        .centered()
-        .run()
-}
-
-struct Login {
+pub struct Login {
     inner: Inner,
     view_state: ViewState,
     account: String,
@@ -24,20 +17,19 @@ struct Login {
 }
 struct Inner {
     auth: Option<Auth>,
-    db: DatabaseConnection,
     client: Client,
     url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-enum ViewState {
+pub enum ViewState {
     #[default]
     Login,
     Register,
 }
 
 #[derive(Debug, Clone)]
-enum Message {
+pub enum Message {
     AccountChanged(String),
     UsernameChanged(String),
     PasswordChanged(String),
@@ -50,7 +42,7 @@ enum Message {
 }
 
 impl Login {
-    fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::AccountChanged(a) => {
                 self.account = a;
@@ -155,7 +147,7 @@ impl Login {
         Task::none()
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let mut content = column![]
             .spacing(20)
             .max_width(300)
@@ -240,12 +232,6 @@ impl Login {
 }
 impl Default for Login {
     fn default() -> Self {
-        //准备数据库
-        let client_db_url = std::env::var("CLIENT_DATABASE").unwrap();
-        // let db = Database::connect(client_db_url).await.unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let db = rt.block_on(async { Database::connect(client_db_url).await.unwrap() });
-
         let root_cert_store =
             rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         let client_config = rustls::ClientConfig::builder()
@@ -265,7 +251,6 @@ impl Default for Login {
         let url = format!("https://{}/", server_name);
         let inner = Inner {
             auth: None,
-            db,
             client,
             url,
         };
