@@ -15,6 +15,7 @@ struct AppState {
 }
 enum Message {
     Login(login::Message),
+    ChangeTo(Screen),
 }
 
 #[derive(Default)]
@@ -32,6 +33,7 @@ impl AppState {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Login(m) => self.screens.login.update(m).map(Message::Login),
+            Message::ChangeTo(_s) => Task::none(),
         }
     }
     fn view(&self) -> Element<'_, Message> {
