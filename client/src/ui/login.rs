@@ -43,7 +43,11 @@ pub enum Message {
 pub enum Action {
     None,
     Run(Task<Message>),
-    ChangeToChat,
+    ChangeToChat {
+        auth: Auth,
+        client: Client,
+        url: String,
+    },
 }
 
 impl Login {
@@ -123,8 +127,12 @@ impl Login {
                 LoginResponse::Success(s) => {
                     let auth = s.auth;
                     println!("login success!: {}", auth.token());
-                    self.inner.auth = Some(auth);
-                    return Action::ChangeToChat;
+                    self.inner.auth = Some(auth.clone());
+                    return Action::ChangeToChat {
+                        auth,
+                        client: self.inner.client.clone(),
+                        url: self.inner.url.clone(),
+                    };
                 }
                 LoginResponse::Fail(e) => {
                     println!("login failed: {:?}", e);

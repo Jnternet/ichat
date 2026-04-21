@@ -21,6 +21,12 @@ pub enum Message {
     Redraw,
     Exit,
 }
+
+pub enum Action {
+    None,
+    Run(Task<Message>),
+    ChangeToLogin { client: Client, url: String },
+}
 impl Chat {
     pub fn new(auth: Auth, db: DatabaseConnection, client: Client, url: String) -> Self {
         Self {
@@ -32,7 +38,7 @@ impl Chat {
             }),
         }
     }
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Action {
         todo!()
     }
     pub fn view(&self) -> Element<'_, Message> {
