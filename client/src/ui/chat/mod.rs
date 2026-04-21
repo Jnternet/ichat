@@ -4,6 +4,8 @@ use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 
+mod chat_util;
+
 #[derive(Default)]
 pub struct Chat {
     pub inner: Option<Inner>,
