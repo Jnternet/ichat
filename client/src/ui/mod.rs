@@ -72,7 +72,10 @@ impl AppState {
         }
     }
     fn view(&self) -> Element<'_, Message> {
-        todo!()
+        match &self.current_screen {
+            Screen::Login(l) => l.view().map(Message::Login),
+            Screen::Chat(c) => c.view().map(Message::Chat),
+        }
     }
 }
 
