@@ -5,8 +5,6 @@ use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 use shared::group::GroupId;
 use shared::message::{C2S_Msg, Msg};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use iced_futures::subscription::{EventStream, Hasher, Recipe, from_recipe};
 use iced_futures::BoxStream;
@@ -21,7 +19,6 @@ pub struct Chat {
     messages: Vec<OneMessage>,
     input: String,
     write_half: Option<TlsWriteHalf>,
-    refresh_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<()>>>>,
 }
 
 impl Default for Chat {
@@ -33,7 +30,6 @@ impl Default for Chat {
             messages: Vec::new(),
             input: String::new(),
             write_half: None,
-            refresh_tx: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -54,7 +50,8 @@ pub enum Message {
     InputChanged(String),
     SendMessage,
     Connected(Result<TlsWriteHalf, String>),
-    Refresh,
+    // 收到新消息并存入 DB，携带所属群组 id
+    Refresh(GroupId),
     Exit,
 }
 
@@ -85,12 +82,10 @@ pub enum Action {
     ChangeToLogin { client: Client, url: String },
 }
 
-// 自定义 Recipe，持有所有需要的数据
 struct TcpRecipe {
     account_id: uuid::Uuid,
     auth: Auth,
     db: DatabaseConnection,
-    refresh_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<()>>>>,
 }
 
 impl Recipe for TcpRecipe {
@@ -101,18 +96,15 @@ impl Recipe for TcpRecipe {
         self.account_id.hash(state);
     }
 
-    fn stream(
-        self: Box<Self>,
-        _input: EventStream,
-    ) -> BoxStream<Self::Output> {
+    fn stream(self: Box<Self>, _input: EventStream) -> BoxStream<Self::Output> {
         let auth = self.auth;
         let db = self.db;
-        let refresh_tx = self.refresh_tx;
 
-        Box::pin(iced::stream::channel(16, async move |mut output| {
+        Box::pin(iced::stream::channel(64, async move |mut output| {
             use iced::futures::SinkExt;
 
-            let (wh, mut rh) = match connect(&auth).await {
+            // 建立 TLS 连接
+            let (wh, rh) = match connect(&auth).await {
                 Ok(v) => v,
                 Err(e) => {
                     let _ = output.send(Message::Connected(Err(e.to_string()))).await;
@@ -121,38 +113,30 @@ impl Recipe for TcpRecipe {
             };
             let _ = output.send(Message::Connected(Ok(wh))).await;
 
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(16);
-            *refresh_tx.lock().await = Some(tx.clone());
-
-            tokio::spawn(async move {
-                use tokio::io::AsyncReadExt;
-                let mut buf = bytes::BytesMut::with_capacity(4096);
-                loop {
-                    buf.clear();
-                    match rh.read_buf(&mut buf).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            match shared::serde_json::from_slice::<shared::message::S2C_Msg>(
-                                &buf[..n],
-                            ) {
-                                Ok(s2c) => {
-                                    if crate::tools::update_info::save_msg(&db, &s2c)
-                                        .await
-                                        .is_err()
-                                    {
-                                        break;
-                                    }
-                                    let _ = tx.send(()).await;
+            // 用 tokio mpsc 把 rh 的消息传给 output
+            // output 是 futures::channel::mpsc::Sender，不能跨线程 clone
+            // 所以直接在同一个 async 块里循环读取
+            use tokio::io::AsyncReadExt;
+            let mut rh = rh;
+            let mut buf = bytes::BytesMut::with_capacity(4096);
+            loop {
+                buf.clear();
+                match rh.read_buf(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        match shared::serde_json::from_slice::<shared::message::S2C_Msg>(
+                            &buf[..n],
+                        ) {
+                            Ok(s2c) => {
+                                let group_id = *s2c.target();
+                                if crate::tools::update_info::save_msg(&db, &s2c).await.is_ok() {
+                                    let _ = output.send(Message::Refresh(group_id)).await;
                                 }
-                                Err(e) => eprintln!("parse msg error: {}", e),
                             }
+                            Err(e) => eprintln!("parse msg error: {}", e),
                         }
                     }
                 }
-            });
-
-            while rx.recv().await.is_some() {
-                let _ = output.send(Message::Refresh).await;
             }
         }))
     }
@@ -198,7 +182,6 @@ impl Chat {
             account_id: inner.auth.account_id(),
             auth: inner.auth.clone(),
             db: inner.db.clone(),
-            refresh_tx: self.refresh_tx.clone(),
         })
     }
 
@@ -271,10 +254,16 @@ impl Chat {
                 eprintln!("Connection failed: {}", e);
                 Action::None
             }
-            Message::Refresh => Action::Run(Task::batch([
-                self.load_groups_task(),
-                self.reload_messages_task(),
-            ])),
+            Message::Refresh(group_id) => {
+                // 始终刷新群组列表（更新 last_msg）
+                // 只有收到消息的群组是当前选中群组时才刷新消息列表
+                let msg_task = if self.selected_group == Some(group_id) {
+                    self.reload_messages_task()
+                } else {
+                    Task::none()
+                };
+                Action::Run(Task::batch([self.load_groups_task(), msg_task]))
+            }
             Message::Exit => {
                 let Some(inner) = &self.inner else { return Action::None };
                 Action::ChangeToLogin {
