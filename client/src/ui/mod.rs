@@ -40,10 +40,10 @@ impl AppState {
                             let db = rt.block_on(async move {
                                 Database::connect(client_db_url).await.unwrap()
                             });
-                            let c = chat::Chat::new(auth, db, client, url);
+                            let (c, task) = chat::Chat::new(auth, db, client, url);
                             //切换页面
                             self.current_screen = Screen::Chat(c);
-                            Task::none()
+                            task.map(Message::Chat)
                         }
                     }
                 } else {

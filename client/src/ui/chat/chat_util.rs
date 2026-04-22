@@ -8,14 +8,20 @@ use shared::auth::Auth;
 use shared::group::GroupId;
 use std::collections::VecDeque;
 
-pub(super) struct OneGroup {
-    id: GroupId,
-    name: String,
-    last_msg: Option<String>,
-    last_msg_time: Option<DateTimeUtc>,
+pub struct OneGroup {
+    pub id: GroupId,
+    pub name: String,
+    pub last_msg: Option<String>,
+    pub last_msg_time: Option<DateTimeUtc>,
 }
-pub(super) struct UIGroups {
-    groups: VecDeque<OneGroup>,
+pub struct UIGroups {
+    pub groups: VecDeque<OneGroup>,
+}
+
+pub struct OneMessage {
+    pub content: String,
+    pub is_mine: bool,
+    pub time: DateTimeUtc,
 }
 
 pub(super) async fn get_groups_info(
@@ -88,3 +94,25 @@ async fn get_one_group(db: &impl ConnectionTrait, id: GroupId) -> Result<OneGrou
     })
 }
 
+pub(super) async fn get_group_messages(
+    auth: Auth,
+    db: DatabaseConnection,
+    group_id: GroupId,
+) -> Result<Vec<OneMessage>, String> {
+    let my_id = auth.account_id();
+    let msgs = messages::Entity::find()
+        .filter(messages::Column::GroupUuid.eq(group_id.0))
+        .order_by_asc(messages::Column::CreateAt)
+        .all(&db)
+        .await
+        .map_err(|e| format!("Failed to query messages: {}", e))?;
+
+    Ok(msgs
+        .into_iter()
+        .map(|m| OneMessage {
+            content: m.content,
+            is_mine: m.account_uuid == my_id,
+            time: m.create_at,
+        })
+        .collect())
+}
