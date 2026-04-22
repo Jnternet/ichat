@@ -1015,6 +1015,7 @@ dependencies = [
  "dotenv",
  "hex",
  "iced",
+ "iced_futures",
  "reqwest",
  "rustls",
  "sea-orm",

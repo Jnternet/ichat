@@ -7,6 +7,7 @@ pub mod login;
 
 pub fn run() -> iced::Result {
     iced::application(AppState::default, AppState::update, AppState::view)
+        .subscription(AppState::subscription)
         .centered()
         .run()
 }
@@ -69,6 +70,12 @@ impl AppState {
                     Task::none()
                 }
             }
+        }
+    }
+    fn subscription(&self) -> iced::Subscription<Message> {
+        match &self.current_screen {
+            Screen::Chat(c) => c.subscription().map(Message::Chat),
+            _ => iced::Subscription::none(),
         }
     }
     fn view(&self) -> Element<'_, Message> {
