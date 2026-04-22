@@ -19,7 +19,6 @@ use shared::group::JoinGroupSuccess;
 use shared::group::ListGroups;
 use shared::group::ListGroupsResponse;
 use shared::group::ListGroupsSuccess;
-use shared::login::*;
 use shared::serde_json;
 
 pub async fn create_group(
