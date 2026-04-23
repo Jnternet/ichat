@@ -4,8 +4,9 @@ use iced::{Alignment, Element, Length, Task};
 use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
+use shared::chrono;
 use shared::group::GroupId;
-use shared::message::C2S_Msg;
+use shared::message::{C2S_Msg, Msg};
 use tokio::sync::mpsc::Sender;
 
 use crate::tools::textchat::text_chat;
@@ -38,7 +39,8 @@ pub enum Message {
     InputChanged(String),
     SendMessage,
     Exit,
-    Redraw,
+    Redraw((UIGroups, Vec<OneMessage>)),
+    EmptyRedraw,
 }
 
 // UIGroups 不能 derive Clone，手动实现
@@ -147,9 +149,29 @@ impl Chat {
                 Action::None
             }
             Message::SendMessage => {
-                // TODO: 发送消息到服务器
+                let Some(gid) = &self.selected_group else {
+                    return Action::None;
+                };
+                let Some(inner) = &self.inner else {
+                    return Action::None;
+                };
+                let auth = inner.auth.clone();
+                let msg = Msg::new(self.input.clone());
+                let now = chrono::Utc::now();
+                let c2s_msg = C2S_Msg::new(auth.clone(), *gid, msg, now);
+
+                let db = inner.db.clone();
+                let gid = *gid;
+
                 self.input.clear();
-                Action::None
+                let s_ = inner.text_sender.clone();
+                Action::Run(Task::perform(
+                    async move {
+                        s_.send(c2s_msg).await.unwrap();
+                        redraw(&gid, auth, db).await
+                    },
+                    Message::Redraw,
+                ))
             }
             Message::Exit => {
                 let Some(inner) = &self.inner else {
@@ -160,7 +182,27 @@ impl Chat {
                     url: inner.url.clone(),
                 }
             }
-            Message::Redraw => Action::Run(self.load_groups_task()),
+            Message::Redraw((g, m)) => {
+                self.groups = Some(g);
+                self.messages = m;
+                Action::None
+            }
+            Message::EmptyRedraw => {
+                let Some(gid) = &self.selected_group else {
+                    return Action::None;
+                };
+                let Some(inner) = &self.inner else {
+                    return Action::None;
+                };
+                let auth = inner.auth.clone();
+
+                let db = inner.db.clone();
+                let gid = *gid;
+                Action::Run(Task::perform(
+                    async move { redraw(&gid, auth, db).await },
+                    Message::Redraw,
+                ))
+            }
         }
     }
 
@@ -264,4 +306,10 @@ impl Chat {
         .height(Length::Fill)
         .into()
     }
+}
+
+async fn redraw(gid: &GroupId, auth: Auth, db: DatabaseConnection) -> (UIGroups, Vec<OneMessage>) {
+    let g = get_groups_info(auth.clone(), db.clone()).await.unwrap();
+    let m = get_group_messages(auth, db, *gid).await.unwrap();
+    (g, m)
 }
