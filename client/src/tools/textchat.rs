@@ -1,5 +1,4 @@
 use crate::tools::update_info::save_msg;
-use rustls::crypto::aws_lc_rs;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 use shared::message::C2S_Msg;
@@ -7,18 +6,15 @@ use shared::*;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
 use tokio_rustls::{TlsConnector, TlsStream};
 
 pub async fn text_chat(
     auth: Auth,
     db: DatabaseConnection,
     mut recv: Receiver<C2S_Msg>,
+    send: Sender<()>,
 ) -> anyhow::Result<()> {
-    dotenv::dotenv().ok();
-    aws_lc_rs::default_provider()
-        .install_default()
-        .expect("unable to set aws_lc_rs as provider");
-
     // 3. 建立与服务端的 TLS 连接
     let server_addr = std::env::var("SERVER_TEXTCHAT_ADDR")?;
     let server_name = std::env::var("SERVER_NAME")?;
@@ -39,6 +35,7 @@ pub async fn text_chat(
     tokio::spawn(async move {
         let mut read_half = read_half;
         let mut buf = bytes::BytesMut::with_capacity(1024);
+        let s = send;
         loop {
             match read_half.read_buf(&mut buf).await {
                 Ok(n) if n > 0 => {
@@ -49,6 +46,7 @@ pub async fn text_chat(
                                 break;
                             };
                             // TODO: 此处应触发页面刷新
+                            s.send(()).await.unwrap();
                         }
                         Err(e) => {
                             eprintln!("解析消息失败: {:?}", e);

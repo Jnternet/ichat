@@ -1,5 +1,4 @@
-use crate::ui::login::Action;
-use iced::{Element, Task};
+use iced::{Element, Subscription, Task};
 use sea_orm::Database;
 
 pub mod chat;
@@ -7,6 +6,7 @@ pub mod login;
 
 pub fn run() -> iced::Result {
     iced::application(AppState::default, AppState::update, AppState::view)
+        .subscription(AppState::subscription)
         .centered()
         .run()
 }
@@ -75,6 +75,12 @@ impl AppState {
         match &self.current_screen {
             Screen::Login(l) => l.view().map(Message::Login),
             Screen::Chat(c) => c.view().map(Message::Chat),
+        }
+    }
+    fn subscription(&self) -> Subscription<Message> {
+        match &self.current_screen {
+            Screen::Chat(c) => c.subscription().map(Message::Chat),
+            _ => Subscription::none(),
         }
     }
 }

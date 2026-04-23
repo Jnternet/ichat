@@ -19,5 +19,5 @@ reqwest = { version = "0.13.2", features = ["json"] }
 sea-orm = { version = "2.0.0-rc", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
 sha2 = "0.11.0"
 hex = "0.4.3"
-uuid = "1.23.0"
+uuid = { version = "1.23.0", features = ["v4"] }
 iced = { version = "0.14.0", features = ["tokio"] }
