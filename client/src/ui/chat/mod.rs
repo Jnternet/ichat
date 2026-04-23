@@ -1,12 +1,16 @@
+use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info};
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::{Alignment, Element, Length, Task};
 use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 use shared::group::GroupId;
+use shared::message::C2S_Msg;
+use tokio::sync::mpsc::Sender;
+
+use crate::tools::textchat::text_chat;
 
 mod chat_util;
-use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info};
 
 #[derive(Default)]
 pub struct Chat {
@@ -23,6 +27,7 @@ pub struct Inner {
     db: DatabaseConnection,
     client: Client,
     url: String,
+    text_sender: Sender<C2S_Msg>,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +38,7 @@ pub enum Message {
     InputChanged(String),
     SendMessage,
     Exit,
+    Redraw,
 }
 
 // UIGroups 不能 derive Clone，手动实现
@@ -68,13 +74,23 @@ pub enum Action {
 }
 
 impl Chat {
-    pub fn new(auth: Auth, db: DatabaseConnection, client: Client, url: String) -> (Self, Task<Message>) {
+    pub fn new(
+        auth: Auth,
+        db: DatabaseConnection,
+        client: Client,
+        url: String,
+    ) -> (Self, Task<Message>) {
+        let (s, r) = tokio::sync::mpsc::channel(100);
         let inner = Inner {
-            auth,
-            db,
+            auth: auth.clone(),
+            db: db.clone(),
             client,
             url,
+            text_sender: s,
         };
+        tokio::spawn(async move {
+            text_chat(auth, db, r).await.unwrap();
+        });
         let chat = Self {
             inner: Some(inner),
             ..Default::default()
@@ -144,6 +160,7 @@ impl Chat {
                     url: inner.url.clone(),
                 }
             }
+            Message::Redraw => Action::Run(self.load_groups_task()),
         }
     }
 
