@@ -1,4 +1,4 @@
-use crate::entity::{account_group, groups, messages};
+use crate::entity::{account_group, accounts, groups, messages};
 use sea_orm::prelude::DateTimeUtc;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
@@ -22,6 +22,7 @@ pub struct OneMessage {
     pub content: String,
     pub is_mine: bool,
     pub time: DateTimeUtc,
+    pub sender_name: String,
 }
 
 pub(super) async fn get_groups_info(
@@ -107,12 +108,21 @@ pub(super) async fn get_group_messages(
         .await
         .map_err(|e| format!("Failed to query messages: {}", e))?;
 
-    Ok(msgs
-        .into_iter()
-        .map(|m| OneMessage {
-            content: m.content,
+    let mut result = Vec::with_capacity(msgs.len());
+    for m in msgs {
+        let sender_name = accounts::Entity::find_by_id(m.account_uuid)
+            .one(&db)
+            .await
+            .ok()
+            .flatten()
+            .map(|a| a.user_name)
+            .unwrap_or_else(|| "未知用户".to_string());
+        result.push(OneMessage {
             is_mine: m.account_uuid == my_id,
+            content: m.content,
             time: m.create_at,
-        })
-        .collect())
+            sender_name,
+        });
+    }
+    Ok(result)
 }

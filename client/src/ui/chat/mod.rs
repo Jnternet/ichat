@@ -5,7 +5,7 @@ use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info};
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
-use iced::{Alignment, Element, Length, Subscription, Task};
+use iced::{Alignment, Element, Length, Subscription, Task, Color};
 use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
@@ -130,6 +130,7 @@ pub struct Chat {
     selected_group: Option<GroupId>,
     messages: Vec<OneMessage>,
     input: String,
+    last_message_count: usize,
 }
 
 pub struct Inner {
@@ -137,7 +138,6 @@ pub struct Inner {
     db: DatabaseConnection,
     client: Client,
     url: String,
-    /// subscription stream 就绪后由 Message::Ready 填入
     msg_tx: Option<mpsc::Sender<C2S_Msg>>,
 }
 
@@ -150,10 +150,9 @@ pub enum Message {
     SendMessage,
     Exit,
     Redraw((UIGroups, Vec<OneMessage>)),
-    /// subscription stream 就绪，携带向 stream 投递消息的发送端
     Ready(mpsc::Sender<C2S_Msg>),
-    /// subscription stream 收到服务器推送
     ServerMsg(S2C_Msg),
+    ScrollToBottom,
 }
 
 impl Clone for UIGroups {
@@ -177,6 +176,7 @@ impl Clone for OneMessage {
             content: self.content.clone(),
             is_mine: self.is_mine,
             time: self.time,
+            sender_name: self.sender_name.clone(),
         }
     }
 }
@@ -220,7 +220,11 @@ impl Chat {
         };
         let chat = Self {
             inner: Some(inner),
-            ..Default::default()
+            groups: None,
+            selected_group: None,
+            messages: Vec::new(),
+            input: String::new(),
+            last_message_count: 0,
         };
         let task = chat.load_groups_task();
         (chat, task)
@@ -262,7 +266,12 @@ impl Chat {
                 ))
             }
             Message::MessagesLoaded(Ok(msgs)) => {
+                let had_more_messages = msgs.len() > self.last_message_count;
                 self.messages = msgs;
+                self.last_message_count = self.messages.len();
+                if had_more_messages && self.selected_group.is_some() {
+                    return Action::Run(Task::done(Message::ScrollToBottom));
+                }
                 Action::None
             }
             Message::MessagesLoaded(Err(e)) => {
@@ -311,8 +320,16 @@ impl Chat {
                 }
             }
             Message::Redraw((g, m)) => {
+                let had_more_messages = m.len() > self.last_message_count;
                 self.groups = Some(g);
                 self.messages = m;
+                self.last_message_count = self.messages.len();
+                if had_more_messages && self.selected_group.is_some() {
+                    return Action::Run(Task::done(Message::ScrollToBottom));
+                }
+                Action::None
+            }
+            Message::ScrollToBottom => {
                 Action::None
             }
             Message::Ready(tx) => {
@@ -373,7 +390,10 @@ impl Chat {
                     .chars()
                     .take(20)
                     .collect::<String>();
-                let item = column![text(&g.name).size(15), text(preview).size(12)].spacing(2);
+                let item = column![
+                    text(&g.name).size(16).color(Color::from_rgb(0.0, 0.0, 0.0)),
+                    text(preview).size(13).color(Color::from_rgb(0.3, 0.3, 0.3))
+                ].spacing(4);
                 let btn = button(item)
                     .on_press(Message::SelectGroup(g.id))
                     .width(Length::Fill)
@@ -391,7 +411,10 @@ impl Chat {
         container(scrollable(col))
             .width(220)
             .height(Length::Fill)
-            .style(container::bordered_box)
+            .style(|_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(Color::from_rgb(0.92, 0.92, 0.92))),
+                ..Default::default()
+            })
             .into()
     }
 
@@ -405,15 +428,23 @@ impl Chat {
                 .into();
         }
 
-        let mut msg_col = column![].spacing(8).padding(10);
+        let mut msg_col = column![].spacing(12).padding(15);
         for msg in &self.messages {
-            let bubble = container(text(&msg.content).size(14))
-                .padding(8)
-                .style(container::rounded_box);
+            let bubble = container(
+                text(&msg.content)
+                    .size(15)
+                    .line_height(1.5)
+            )
+            .padding(12)
+            .style(container::rounded_box);
             let row_item = if msg.is_mine {
                 row![iced::widget::Space::new().width(Length::Fill), bubble]
             } else {
-                row![bubble, iced::widget::Space::new().width(Length::Fill)]
+                let name_label = text(&msg.sender_name)
+                    .size(12)
+                    .color(Color::from_rgb(0.0, 0.5, 0.8));
+                let with_name = column![name_label, bubble].spacing(4);
+                row![with_name, iced::widget::Space::new().width(Length::Fill)]
             };
             msg_col = msg_col.push(row_item.width(Length::Fill));
         }
@@ -422,16 +453,22 @@ impl Chat {
             text_input("输入消息...", &self.input)
                 .on_input(Message::InputChanged)
                 .on_submit(Message::SendMessage)
-                .padding(8)
+                .padding(10)
+                .size(15)
                 .width(Length::Fill),
-            button("发送").on_press(Message::SendMessage).padding(8),
+            button("发送")
+                .on_press(Message::SendMessage)
+                .padding(10)
         ]
-        .spacing(8)
-        .padding(10)
+        .spacing(10)
+        .padding(12)
         .align_y(Alignment::Center);
 
         column![
-            scrollable(msg_col).height(Length::Fill).width(Length::Fill),
+            scrollable(msg_col)
+                .height(Length::Fill)
+                .width(Length::Fill)
+                .anchor_bottom(),
             input_row,
         ]
         .width(Length::Fill)
