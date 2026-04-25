@@ -27,6 +27,7 @@ pub async fn update_info(
     url: &str,
     get_update: &GetUpdate,
 ) -> anyhow::Result<UpdateInfoResponse> {
+    let url = format!("{}update_info", url);
     let text = client
         .post(url)
         .json(get_update)

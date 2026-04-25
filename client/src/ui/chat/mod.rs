@@ -1,3 +1,4 @@
+use crate::tools;
 use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info};
 use iced::Subscription;
 use iced::futures::SinkExt;
@@ -94,13 +95,29 @@ impl Chat {
         let inner = Inner {
             auth: auth.clone(),
             db: db.clone(),
-            client,
-            url,
+            client: client.clone(),
+            url: url.clone(),
             text_sender: s,
             subs_recv: HashRx::new(r2),
         };
+        let db_ = db.clone();
+        let auth_ = auth.clone();
         tokio::spawn(async move {
-            text_chat(auth, db, r, s2).await.unwrap();
+            let gu = tools::update_info::get_last_message_timestamp(&db_, &auth_)
+                .await
+                .unwrap();
+            let uir = tools::update_info::update_info(&client, &url, &gu)
+                .await
+                .unwrap();
+            let nm = uir.success().unwrap();
+            tools::update_info::save_to_db(&db_, &client, &url, nm, &auth_)
+                .await
+                .unwrap();
+        });
+        let db_ = db.clone();
+        let auth_ = auth.clone();
+        tokio::spawn(async move {
+            text_chat(auth_, db_, r, s2).await.unwrap();
         });
         let chat = Self {
             inner: Some(inner),
