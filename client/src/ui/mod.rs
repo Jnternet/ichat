@@ -1,14 +1,29 @@
-use iced::{Element, Subscription, Task};
+use iced::{Element, Subscription, Task, Theme, color};
 use sea_orm::Database;
 
 pub mod chat;
 pub mod login;
 
 pub fn run() -> iced::Result {
+    let custom_theme = custom_theme();
     iced::application(AppState::default, AppState::update, AppState::view)
         .subscription(AppState::subscription)
+        .theme(custom_theme)
         .centered()
         .run()
+}
+
+fn custom_theme() -> Theme {
+    use iced::theme::Palette;
+    let custom_palette = Palette {
+        background: color!(0xffffff),
+        text: color!(0x000000),
+        primary: color!(0x2e7d32), // 绿色代替蓝色
+        success: color!(0x12664f),
+        warning: color!(0xb77e33),
+        danger: color!(0xc3423f),
+    };
+    Theme::custom("NoBlueTheme", custom_palette)
 }
 
 struct AppState {

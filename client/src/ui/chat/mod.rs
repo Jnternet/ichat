@@ -442,7 +442,7 @@ impl Chat {
             } else {
                 let name_label = text(&msg.sender_name)
                     .size(12)
-                    .color(Color::from_rgb(0.0, 0.5, 0.8));
+                    .color(Color::from_rgb(0.2, 0.6, 0.3));
                 let with_name = column![name_label, bubble].spacing(4);
                 row![with_name, iced::widget::Space::new().width(Length::Fill)]
             };
