@@ -216,6 +216,7 @@ async fn handle_wh(
         write_half
             .write_all(serde_json::to_vec(&m)?.as_slice())
             .await?;
+        write_half.flush().await?;
     }
     Ok(())
 }

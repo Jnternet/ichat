@@ -1,25 +1,127 @@
 use crate::tools;
+use crate::tools::textchat::{get_connector, get_tls_stream};
+use crate::tools::update_info::save_msg;
 use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info};
-use iced::Subscription;
 use iced::futures::SinkExt;
+use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
-use iced::{Alignment, Element, Length, Task};
+use iced::{Alignment, Element, Length, Subscription, Task};
 use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 use shared::chrono;
 use shared::group::GroupId;
-use shared::message::{C2S_Msg, Msg};
-use std::hash::Hash;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::Sender;
-use uuid::Uuid;
-
-use crate::tools::textchat::text_chat;
+use shared::message::{C2S_Msg, Msg, S2C_Msg};
+use shared::serde_json;
+use std::hash::{Hash, Hasher};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
 
 mod chat_util;
+
+// ── subscription 的 data 类型，实现 Hash 供 run_with 去重 ──────────────────
+
+#[derive(Clone)]
+struct SubData {
+    auth: Auth,
+    db: DatabaseConnection,
+}
+
+impl Hash for SubData {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.auth.account_id().hash(state);
+    }
+}
+
+impl PartialEq for SubData {
+    fn eq(&self, other: &Self) -> bool {
+        self.auth.account_id() == other.auth.account_id()
+    }
+}
+
+impl Eq for SubData {}
+
+// builder 必须是 fn 指针（不捕获），从 &SubData 取数据
+fn textchat_stream(data: &SubData) -> iced::futures::stream::BoxStream<'static, Message> {
+    let auth = data.auth.clone();
+    let _db = data.db.clone();
+
+    Box::pin(iced::stream::channel(
+        100,
+        move |mut output: IcedSender<Message>| async move {
+            // 建立内部 channel：stream 持有 rx，tx 通过 Message::Ready 交给 update()
+            let (tx, mut rx) = mpsc::channel::<C2S_Msg>(100);
+            if output.send(Message::Ready(tx)).await.is_err() {
+                return;
+            }
+
+            let server_addr = match std::env::var("SERVER_TEXTCHAT_ADDR") {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[sub] SERVER_TEXTCHAT_ADDR: {e}");
+                    return;
+                }
+            };
+            let server_name = match std::env::var("SERVER_NAME") {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[sub] SERVER_NAME: {e}");
+                    return;
+                }
+            };
+
+            let connector = get_connector();
+            let mut tls = match get_tls_stream(&connector, &server_addr, &server_name).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[sub] TLS 连接失败: {e}");
+                    return;
+                }
+            };
+
+            let auth_bytes = serde_json::to_vec(&auth).unwrap();
+            if tls.write_all(&auth_bytes).await.is_err() || tls.flush().await.is_err() {
+                eprintln!("[sub] 发送 Auth 失败");
+                return;
+            }
+
+            let (mut rh, mut wh) = tokio::io::split(tls);
+            let mut buf = bytes::BytesMut::with_capacity(4096);
+
+            loop {
+                tokio::select! {
+                    msg = rx.recv() => {
+                        let Some(c2s) = msg else { break; };
+                        let b = serde_json::to_vec(&c2s).unwrap();
+                        if wh.write_all(&b).await.is_err() || wh.flush().await.is_err() {
+                            eprintln!("[sub] 发送消息失败");
+                            break;
+                        }
+                    }
+                    result = rh.read_buf(&mut buf) => {
+                        match result {
+                            Ok(0) => { eprintln!("[sub] 服务器关闭连接"); break; }
+                            Ok(_) => {
+                                match serde_json::from_slice::<S2C_Msg>(&buf) {
+                                    Ok(msg) => {
+                                        buf.clear();
+                                        let _ = output.send(Message::ServerMsg(msg)).await;
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[sub] 解析失败 ({} bytes): {e}", buf.len());
+                                    }
+                                }
+                            }
+                            Err(e) => { eprintln!("[sub] 读取失败: {e}"); break; }
+                        }
+                    }
+                }
+            }
+        },
+    ))
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct Chat {
@@ -35,8 +137,8 @@ pub struct Inner {
     db: DatabaseConnection,
     client: Client,
     url: String,
-    text_sender: Sender<C2S_Msg>,
-    subs_recv: HashRx,
+    /// subscription stream 就绪后由 Message::Ready 填入
+    msg_tx: Option<mpsc::Sender<C2S_Msg>>,
 }
 
 #[derive(Debug, Clone)]
@@ -48,10 +150,12 @@ pub enum Message {
     SendMessage,
     Exit,
     Redraw((UIGroups, Vec<OneMessage>)),
-    EmptyRedraw,
+    /// subscription stream 就绪，携带向 stream 投递消息的发送端
+    Ready(mpsc::Sender<C2S_Msg>),
+    /// subscription stream 收到服务器推送
+    ServerMsg(S2C_Msg),
 }
 
-// UIGroups 不能 derive Clone，手动实现
 impl Clone for UIGroups {
     fn clone(&self) -> Self {
         unreachable!("UIGroups should not be cloned")
@@ -90,35 +194,30 @@ impl Chat {
         client: Client,
         url: String,
     ) -> (Self, Task<Message>) {
-        let (s, r) = tokio::sync::mpsc::channel(100);
-        let (s2, r2) = tokio::sync::mpsc::channel(100);
-        let inner = Inner {
-            auth: auth.clone(),
-            db: db.clone(),
-            client: client.clone(),
-            url: url.clone(),
-            text_sender: s,
-            subs_recv: HashRx::new(r2),
-        };
         let db_ = db.clone();
         let auth_ = auth.clone();
+        let client_ = client.clone();
+        let url_ = url.clone();
         tokio::spawn(async move {
             let gu = tools::update_info::get_last_message_timestamp(&db_, &auth_)
                 .await
                 .unwrap();
-            let uir = tools::update_info::update_info(&client, &url, &gu)
+            let uir = tools::update_info::update_info(&client_, &url_, &gu)
                 .await
                 .unwrap();
             let nm = uir.success().unwrap();
-            tools::update_info::save_to_db(&db_, &client, &url, nm, &auth_)
+            tools::update_info::save_to_db(&db_, &client_, &url_, nm, &auth_)
                 .await
                 .unwrap();
         });
-        let db_ = db.clone();
-        let auth_ = auth.clone();
-        tokio::spawn(async move {
-            text_chat(auth_, db_, r, s2).await.unwrap();
-        });
+
+        let inner = Inner {
+            auth: auth.clone(),
+            db: db.clone(),
+            client,
+            url,
+            msg_tx: None,
+        };
         let chat = Self {
             inner: Some(inner),
             ..Default::default()
@@ -175,36 +274,28 @@ impl Chat {
                 Action::None
             }
             Message::SendMessage => {
-                let Some(gid) = &self.selected_group else {
-                    eprintln!("[chat] SendMessage: 未选择群组");
+                let Some(gid) = self.selected_group else {
                     return Action::None;
                 };
                 let Some(inner) = &self.inner else {
-                    eprintln!("[chat] SendMessage: inner 为空");
                     return Action::None;
                 };
                 if self.input.is_empty() {
-                    eprintln!("[chat] SendMessage: 输入为空，放弃发送");
                     return Action::None;
                 }
-                eprintln!("[chat] SendMessage: 发送消息到群组 {:?}，内容: {:?}", gid, self.input);
+                let Some(tx) = inner.msg_tx.clone() else {
+                    eprintln!("[chat] subscription 尚未就绪");
+                    return Action::None;
+                };
                 let auth = inner.auth.clone();
                 let msg = Msg::new(self.input.clone());
                 let now = chrono::Utc::now();
-                let c2s_msg = C2S_Msg::new(auth.clone(), *gid, msg, now);
-
+                let c2s_msg = C2S_Msg::new(auth.clone(), gid, msg, now);
                 let db = inner.db.clone();
-                let gid = *gid;
-
                 self.input.clear();
-                let s_ = inner.text_sender.clone();
                 Action::Run(Task::perform(
                     async move {
-                        eprintln!("[chat] 将消息写入 channel");
-                        match s_.send(c2s_msg).await {
-                            Ok(_) => eprintln!("[chat] 消息写入 channel 成功"),
-                            Err(e) => eprintln!("[chat] 消息写入 channel 失败: {:?}", e),
-                        }
+                        let _ = tx.send(c2s_msg).await;
                         redraw(&gid, auth, db).await
                     },
                     Message::Redraw,
@@ -224,19 +315,30 @@ impl Chat {
                 self.messages = m;
                 Action::None
             }
-            Message::EmptyRedraw => {
-                let Some(gid) = &self.selected_group else {
-                    return Action::None;
-                };
+            Message::Ready(tx) => {
+                if let Some(inner) = &mut self.inner {
+                    inner.msg_tx = Some(tx);
+                }
+                Action::None
+            }
+            Message::ServerMsg(s2c_msg) => {
                 let Some(inner) = &self.inner else {
                     return Action::None;
                 };
-                let auth = inner.auth.clone();
-
                 let db = inner.db.clone();
-                let gid = *gid;
+                let auth = inner.auth.clone();
+                let gid = self.selected_group;
                 Action::Run(Task::perform(
-                    async move { redraw(&gid, auth, db).await },
+                    async move {
+                        let _ = save_msg(&db, &s2c_msg).await;
+                        match gid {
+                            Some(gid) => redraw(&gid, auth, db).await,
+                            None => {
+                                let g = get_groups_info(auth, db).await.unwrap();
+                                (g, vec![])
+                            }
+                        }
+                    },
                     Message::Redraw,
                 ))
             }
@@ -244,10 +346,7 @@ impl Chat {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let group_list = self.view_group_list();
-        let chat_area = self.view_chat_area();
-
-        row![group_list, chat_area]
+        row![self.view_group_list(), self.view_chat_area()]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -274,14 +373,11 @@ impl Chat {
                     .chars()
                     .take(20)
                     .collect::<String>();
-
-                let item = column![text(&g.name).size(15), text(preview).size(12),].spacing(2);
-
+                let item = column![text(&g.name).size(15), text(preview).size(12)].spacing(2);
                 let btn = button(item)
                     .on_press(Message::SelectGroup(g.id))
                     .width(Length::Fill)
                     .padding(8);
-
                 col = col.push(if is_selected {
                     container(btn).style(container::rounded_box)
                 } else {
@@ -314,7 +410,6 @@ impl Chat {
             let bubble = container(text(&msg.content).size(14))
                 .padding(8)
                 .style(container::rounded_box);
-
             let row_item = if msg.is_mine {
                 row![iced::widget::Space::new().width(Length::Fill), bubble]
             } else {
@@ -344,59 +439,17 @@ impl Chat {
         .into()
     }
 
-    // pub fn subscription(&self) -> Subscription<Message> {
-    //     let Some(inner) = &self.inner else {
-    //         return Subscription::none();
-    //     };
-    //     if let Ok(mut opt) = inner.subs_recv.try_borrow_mut() {
-    //         if let Some(rx) = opt.take() {
-    //             let r = Arc::new(HashRx::new(rx));
-    //             // TODO: 创建
-    //             return Subscription::run_with((r,), move |(hr,)| {
-    //                 let ar = hr.clone();
-    //                 iced::stream::channel(
-    //                     100,
-    //                     move |mut out: iced::futures::channel::mpsc::Sender<Message>| async move {
-    //                         while let Some(()) = ar.1.clone().lock().await.recv().await {
-    //                             out.send(Message::EmptyRedraw).await.unwrap();
-    //                         }
-    //                     },
-    //                 )
-    //             });
-    //         }
-    //         return Subscription::none();
-    //     }
-    //     Subscription::none()
-    // }
     pub fn subscription(&self) -> Subscription<Message> {
-        use iced::futures::channel::mpsc::Sender as IcedSender;
         let Some(inner) = &self.inner else {
             return Subscription::none();
         };
-        let ar = inner.subs_recv.clone();
-        Subscription::run_with(ar, move |ar| {
-            let r = ar.clone();
-            iced::stream::channel(100, move |mut out: IcedSender<Message>| async move {
-                eprintln!("[chat] subscription 已启动，等待服务器消息");
-                while let Some(()) = r.1.clone().lock().await.recv().await {
-                    eprintln!("[chat] 收到服务器消息通知，触发 EmptyRedraw");
-                    out.send(Message::EmptyRedraw).await.unwrap();
-                }
-                eprintln!("[chat] subscription channel 已关闭");
-            })
-        })
-    }
-}
-#[derive(Debug, Clone)]
-struct HashRx(Uuid, Arc<Mutex<Receiver<()>>>);
-impl Hash for HashRx {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-impl HashRx {
-    fn new(r: Receiver<()>) -> Self {
-        Self(Uuid::new_v4(), Arc::new(Mutex::new(r)))
+        Subscription::run_with(
+            SubData {
+                auth: inner.auth.clone(),
+                db: inner.db.clone(),
+            },
+            textchat_stream,
+        )
     }
 }
 
