@@ -116,16 +116,15 @@ impl Recipe for TcpRecipe {
             // 用 tokio mpsc 把 rh 的消息传给 output
             // output 是 futures::channel::mpsc::Sender，不能跨线程 clone
             // 所以直接在同一个 async 块里循环读取
-            use tokio::io::AsyncReadExt;
-            let mut rh = rh;
-            let mut buf = bytes::BytesMut::with_capacity(4096);
+            use tokio::io::AsyncBufReadExt;
+            let mut rh = tokio::io::BufReader::new(rh);
             loop {
-                buf.clear();
-                match rh.read_buf(&mut buf).await {
+                let mut line = String::new();
+                match rh.read_line(&mut line).await {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        match shared::serde_json::from_slice::<shared::message::S2C_Msg>(
-                            &buf[..n],
+                    Ok(_) => {
+                        match shared::serde_json::from_str::<shared::message::S2C_Msg>(
+                            line.trim_end(),
                         ) {
                             Ok(s2c) => {
                                 let group_id = *s2c.target();
@@ -235,6 +234,7 @@ impl Chat {
                             shared::serde_json::to_vec(&c2s).map_err(|e| e.to_string())?;
                         let mut wh = wh.0.lock().await;
                         wh.write_all(&bytes).await.map_err(|e| e.to_string())?;
+                        wh.write_all(b"\n").await.map_err(|e| e.to_string())?;
                         wh.flush().await.map_err(|e| e.to_string())?;
                         Ok::<(), String>(())
                     },

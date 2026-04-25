@@ -134,12 +134,15 @@ pub async fn handle_client(
     online_groups: OnlineGroups<S2C_Msg>,
 ) -> anyhow::Result<()> {
     let (mut rh, wh) = tokio::io::split(tls_stream);
-    let mut buf = bytes::BytesMut::with_capacity(1024);
-    let u = rh
-        .read_buf(&mut buf)
+    use tokio::io::AsyncBufReadExt;
+    let mut reader = tokio::io::BufReader::new(rh);
+    let mut auth_line = String::new();
+    reader
+        .read_line(&mut auth_line)
         .await
         .context("cannot read from client")?;
-    let auth = serde_json::from_slice::<Auth>(&buf[..u]).context("cannot get auth")?;
+    let auth = serde_json::from_str::<Auth>(auth_line.trim_end()).context("cannot get auth")?;
+    let rh = reader.into_inner();
     let v_ag: Vec<_> = AccountGroup::find()
         .filter(account_group::COLUMN.account_uuid.eq(auth.account_id()))
         .all(&db)
@@ -177,11 +180,16 @@ async fn handle_rh(
     online_groups: OnlineGroups<S2C_Msg>,
     _auth: Auth,
 ) -> anyhow::Result<()> {
+    use tokio::io::AsyncBufReadExt;
     eprintln!("进入handle_rh");
+    let mut reader = tokio::io::BufReader::new(read_half);
     loop {
-        let mut buf = bytes::BytesMut::with_capacity(1024);
-        read_half.read_buf(&mut buf).await?;
-        let msg = serde_json::from_slice::<C2S_Msg>(&buf)?;
+        let mut line = String::new();
+        let n = reader.read_line(&mut line).await?;
+        if n == 0 {
+            break Ok(());
+        }
+        let msg = serde_json::from_str::<C2S_Msg>(line.trim_end())?;
         // buf.clear();
         //保存到数据库
         let m = save_msg(&db, msg.clone()).await?;
@@ -213,9 +221,9 @@ async fn handle_wh(
 ) -> anyhow::Result<()> {
     eprintln!("进入handle_wh");
     while let Some(m) = sa.next().await {
-        write_half
-            .write_all(serde_json::to_vec(&m)?.as_slice())
-            .await?;
+        let mut bytes = serde_json::to_vec(&m)?;
+        bytes.push(b'\n');
+        write_half.write_all(&bytes).await?;
     }
     Ok(())
 }

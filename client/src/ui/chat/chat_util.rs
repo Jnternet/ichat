@@ -64,6 +64,7 @@ pub(super) async fn connect(
 
     let auth_json = shared::serde_json::to_vec(auth)?;
     tls.write_all(&auth_json).await?;
+    tls.write_all(b"\n").await?;
     tls.flush().await?;
 
     let (rh, wh) = tokio::io::split(tls);
