@@ -9,7 +9,6 @@ use shared::auth::Auth;
 use shared::chrono;
 use shared::group::GroupId;
 use shared::message::{C2S_Msg, Msg};
-use std::cell::RefCell;
 use std::hash::Hash;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -36,19 +35,7 @@ pub struct Inner {
     client: Client,
     url: String,
     text_sender: Sender<C2S_Msg>,
-    subs_recv: RefCell<Option<Receiver<()>>>,
-}
-impl Clone for Inner {
-    fn clone(&self) -> Self {
-        Self {
-            subs_recv: RefCell::new(None),
-            auth: self.auth.clone(),
-            db: self.db.clone(),
-            client: self.client.clone(),
-            url: self.url.clone(),
-            text_sender: self.text_sender.clone(),
-        }
-    }
+    subs_recv: HashRx,
 }
 
 #[derive(Debug, Clone)]
@@ -110,7 +97,7 @@ impl Chat {
             client,
             url,
             text_sender: s,
-            subs_recv: RefCell::new(Some(r2)),
+            subs_recv: HashRx::new(r2),
         };
         tokio::spawn(async move {
             text_chat(auth, db, r, s2).await.unwrap();
@@ -328,32 +315,49 @@ impl Chat {
         .height(Length::Fill)
         .into()
     }
+
+    // pub fn subscription(&self) -> Subscription<Message> {
+    //     let Some(inner) = &self.inner else {
+    //         return Subscription::none();
+    //     };
+    //     if let Ok(mut opt) = inner.subs_recv.try_borrow_mut() {
+    //         if let Some(rx) = opt.take() {
+    //             let r = Arc::new(HashRx::new(rx));
+    //             // TODO: 创建
+    //             return Subscription::run_with((r,), move |(hr,)| {
+    //                 let ar = hr.clone();
+    //                 iced::stream::channel(
+    //                     100,
+    //                     move |mut out: iced::futures::channel::mpsc::Sender<Message>| async move {
+    //                         while let Some(()) = ar.1.clone().lock().await.recv().await {
+    //                             out.send(Message::EmptyRedraw).await.unwrap();
+    //                         }
+    //                     },
+    //                 )
+    //             });
+    //         }
+    //         return Subscription::none();
+    //     }
+    //     Subscription::none()
+    // }
     pub fn subscription(&self) -> Subscription<Message> {
+        use iced::futures::channel::mpsc::Sender as IcedSender;
         let Some(inner) = &self.inner else {
             return Subscription::none();
         };
-        if let Ok(mut opt) = inner.subs_recv.try_borrow_mut() {
-            if let Some(rx) = opt.take() {
-                let r = Arc::new(HashRx::new(rx));
-                // TODO: 创建
-                return Subscription::run_with((r,), move |(hr,)| {
-                    let ar = hr.clone();
-                    iced::stream::channel(
-                        100,
-                        move |mut out: iced::futures::channel::mpsc::Sender<Message>| async move {
-                            while let Some(()) = ar.1.clone().lock().await.recv().await {
-                                out.send(Message::EmptyRedraw).await.unwrap();
-                            }
-                        },
-                    )
-                });
-            }
-            return Subscription::none();
-        }
-        Subscription::none()
+        let ar = inner.subs_recv.clone();
+        Subscription::run_with(ar, move |ar| {
+            let r = ar.clone();
+            iced::stream::channel(100, move |mut out: IcedSender<Message>| async move {
+                //
+                while let Some(()) = r.1.clone().lock().await.recv().await {
+                    out.send(Message::EmptyRedraw).await.unwrap();
+                }
+            })
+        })
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct HashRx(Uuid, Arc<Mutex<Receiver<()>>>);
 impl Hash for HashRx {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
