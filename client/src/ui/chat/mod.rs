@@ -176,11 +176,18 @@ impl Chat {
             }
             Message::SendMessage => {
                 let Some(gid) = &self.selected_group else {
+                    eprintln!("[chat] SendMessage: 未选择群组");
                     return Action::None;
                 };
                 let Some(inner) = &self.inner else {
+                    eprintln!("[chat] SendMessage: inner 为空");
                     return Action::None;
                 };
+                if self.input.is_empty() {
+                    eprintln!("[chat] SendMessage: 输入为空，放弃发送");
+                    return Action::None;
+                }
+                eprintln!("[chat] SendMessage: 发送消息到群组 {:?}，内容: {:?}", gid, self.input);
                 let auth = inner.auth.clone();
                 let msg = Msg::new(self.input.clone());
                 let now = chrono::Utc::now();
@@ -193,7 +200,11 @@ impl Chat {
                 let s_ = inner.text_sender.clone();
                 Action::Run(Task::perform(
                     async move {
-                        s_.send(c2s_msg).await.unwrap();
+                        eprintln!("[chat] 将消息写入 channel");
+                        match s_.send(c2s_msg).await {
+                            Ok(_) => eprintln!("[chat] 消息写入 channel 成功"),
+                            Err(e) => eprintln!("[chat] 消息写入 channel 失败: {:?}", e),
+                        }
                         redraw(&gid, auth, db).await
                     },
                     Message::Redraw,
@@ -366,10 +377,12 @@ impl Chat {
         Subscription::run_with(ar, move |ar| {
             let r = ar.clone();
             iced::stream::channel(100, move |mut out: IcedSender<Message>| async move {
-                //
+                eprintln!("[chat] subscription 已启动，等待服务器消息");
                 while let Some(()) = r.1.clone().lock().await.recv().await {
+                    eprintln!("[chat] 收到服务器消息通知，触发 EmptyRedraw");
                     out.send(Message::EmptyRedraw).await.unwrap();
                 }
+                eprintln!("[chat] subscription channel 已关闭");
             })
         })
     }

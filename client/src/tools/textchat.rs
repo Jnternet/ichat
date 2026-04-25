@@ -15,67 +15,83 @@ pub async fn text_chat(
     mut recv: Receiver<C2S_Msg>,
     send: Sender<()>,
 ) -> anyhow::Result<()> {
-    // 3. 建立与服务端的 TLS 连接
     let server_addr = std::env::var("SERVER_TEXTCHAT_ADDR")?;
     let server_name = std::env::var("SERVER_NAME")?;
-    let connector = get_connector();
-    let mut tls_stream = get_tls_stream(&connector, &server_addr, &server_name).await?;
+    eprintln!("[textchat] 连接服务器: {} ({})", server_addr, server_name);
 
-    // 4. 发送 Auth 信息进行认证
+    let connector = get_connector();
+    let mut tls_stream = match get_tls_stream(&connector, &server_addr, &server_name).await {
+        Ok(s) => { eprintln!("[textchat] TLS 连接成功"); s }
+        Err(e) => { eprintln!("[textchat] TLS 连接失败: {:?}", e); return Err(e); }
+    };
+
     let auth_json = serde_json::to_vec(&auth)?;
+    eprintln!("[textchat] 发送 Auth ({} bytes)", auth_json.len());
     tls_stream.write_all(&auth_json).await?;
     tls_stream.flush().await?;
+    eprintln!("[textchat] Auth 发送完毕，分离读写流");
 
-    // 5. 分离读写流，分别处理消息的发送和接收
     let (read_half, write_half) = tokio::io::split(tls_stream);
-
     let db_ = db.clone();
 
     // 接收消息的任务
     tokio::spawn(async move {
+        eprintln!("[textchat] 接收任务启动");
         let mut read_half = read_half;
         let mut buf = bytes::BytesMut::with_capacity(1024);
         let s = send;
         loop {
             match read_half.read_buf(&mut buf).await {
-                Ok(n) if n > 0 => {
-                    let msg = serde_json::from_slice::<shared::message::S2C_Msg>(&buf[..n]);
+                Ok(0) => {
+                    eprintln!("[textchat] 服务器关闭连接");
+                    break;
+                }
+                Ok(n) => {
+                    eprintln!("[textchat] 收到 {} bytes，buf 总长 {}: {:?}", n, buf.len(), &buf[..]);
+                    let msg = serde_json::from_slice::<shared::message::S2C_Msg>(&buf);
                     match msg {
                         Ok(s2c_msg) => {
-                            if save_msg(&db_, &s2c_msg).await.is_err() {
-                                break;
-                            };
-                            // TODO: 此处应触发页面刷新
-                            s.send(()).await.unwrap();
+                            eprintln!("[textchat] 解析消息成功，保存到 db");
+                            buf.clear();
+                            match save_msg(&db_, &s2c_msg).await {
+                                Ok(_) => { s.send(()).await.unwrap(); }
+                                Err(e) => { eprintln!("[textchat] 保存消息失败: {:?}", e); break; }
+                            }
                         }
                         Err(e) => {
-                            eprintln!("解析消息失败: {:?}", e);
+                            eprintln!("[textchat] 解析消息失败 (buf {} bytes): {:?}", buf.len(), e);
+                            // 数据不完整时不清空，等待更多数据；若已确认损坏则清空
                         }
                     }
-                    // buf.clear();
                 }
-                Ok(_) => break,
                 Err(e) => {
-                    eprintln!("读取消息失败: {:?}", e);
+                    eprintln!("[textchat] 读取失败: {:?}", e);
                     break;
                 }
             }
-            // buf.clear();
         }
+        eprintln!("[textchat] 接收任务退出");
     });
 
     // 发送消息的任务
     tokio::spawn(async move {
+        eprintln!("[textchat] 发送任务启动");
         let mut wh = write_half;
         while let Some(msg) = recv.recv().await {
             let b = serde_json::to_vec(&msg).unwrap();
-            wh.write_all(&b).await.unwrap();
-            wh.flush().await.unwrap();
+            eprintln!("[textchat] 发送消息 {} bytes", b.len());
+            match wh.write_all(&b).await {
+                Ok(_) => {}
+                Err(e) => { eprintln!("[textchat] 发送失败: {:?}", e); break; }
+            }
+            match wh.flush().await {
+                Ok(_) => { eprintln!("[textchat] 消息发送并 flush 完毕"); }
+                Err(e) => { eprintln!("[textchat] flush 失败: {:?}", e); break; }
+            }
         }
+        eprintln!("[textchat] 发送任务退出");
     });
 
-    //阻塞住主线程
-    std::thread::park();
     Ok(())
 }
 
