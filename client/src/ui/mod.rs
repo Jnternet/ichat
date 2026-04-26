@@ -16,14 +16,14 @@ pub fn run() -> iced::Result {
 fn custom_theme() -> Theme {
     use iced::theme::Palette;
     let custom_palette = Palette {
-        background: color!(0xffffff),
-        text: color!(0x000000),
-        primary: color!(0xe91e63),   // 粉色
-        success: color!(0xf48fb1),    // 浅粉色
-        warning: color!(0xb77e33),    // 橙色
-        danger: color!(0xc3423f),     // 红色
+        background: color!(0xf8f9fa),    // 浅灰色背景
+        text: color!(0x343a40),          // 深灰色文本
+        primary: color!(0x6c757d),       // 中灰色主色调
+        success: color!(0x868e96),       // 浅灰色成功色
+        warning: color!(0xadb5bd),       // 极浅灰色警告色
+        danger: color!(0xc3423f),        // 红色错误色（保持不变）
     };
-    Theme::custom("PinkTheme", custom_palette)
+    Theme::custom("GrayTheme", custom_palette)
 }
 
 struct AppState {

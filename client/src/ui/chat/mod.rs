@@ -457,7 +457,7 @@ impl Chat {
     fn view_group_list(&self) -> Element<'_, Message> {
         let mut col = column![
             row![
-                text("群组").size(18).width(Length::Fill).color(Color::from_rgb(0.7, 0.2, 0.4)),
+                text("群组").size(18).width(Length::Fill).color(Color::from_rgb(0.5, 0.5, 0.5)),
                 button("退出").on_press(Message::Exit)
             ]
             .align_y(Alignment::Center)
@@ -468,7 +468,7 @@ impl Chat {
                     .width(Length::FillPortion(1))
                     .padding(8)
                     .style(|_, _| iced::widget::button::Style {
-                        background: Some(iced::Background::Color(Color::from_rgb(0.9, 0.4, 0.6))),
+                        background: Some(iced::Background::Color(Color::from_rgb(0.7, 0.7, 0.7))),
                         text_color: Color::from_rgb(1.0, 1.0, 1.0),
                         ..Default::default()
                     }),
@@ -476,7 +476,7 @@ impl Chat {
                     .width(Length::FillPortion(1))
                     .padding(8)
                     .style(|_, _| iced::widget::button::Style {
-                        background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.3, 0.5))),
+                        background: Some(iced::Background::Color(Color::from_rgb(0.6, 0.6, 0.6))),
                         text_color: Color::from_rgb(1.0, 1.0, 1.0),
                         ..Default::default()
                     })
@@ -491,10 +491,10 @@ impl Chat {
             match result {
                 Ok(message) => {
                     col = col.push(
-                        container(text(message).size(14).color(Color::from_rgb(0.9, 0.3, 0.5)))
+                        container(text(message).size(14).color(Color::from_rgb(0.5, 0.5, 0.5)))
                             .padding(8)
                             .style(|_| iced::widget::container::Style {
-                                background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.98, 0.95))),
+                                background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
                                 ..Default::default()
                             })
                     );
@@ -517,7 +517,7 @@ impl Chat {
             col = col.push(
                 container(
                     column![
-                        text("创建新群组").size(16).color(Color::from_rgb(0.7, 0.2, 0.4)),
+                        text("创建新群组").size(16).color(Color::from_rgb(0.5, 0.5, 0.5)),
                         text_input("群组名称", &self.group_name)
                             .on_input(Message::GroupNameChanged)
                             .padding(8)
@@ -526,7 +526,7 @@ impl Chat {
                             button("创建").on_press(Message::GroupOperationResult(Ok("创建群组成功".to_string())))
                                 .padding(8)
                                 .style(|_, _| iced::widget::button::Style {
-                                    background: Some(iced::Background::Color(Color::from_rgb(0.9, 0.4, 0.6))),
+                                    background: Some(iced::Background::Color(Color::from_rgb(0.7, 0.7, 0.7))),
                                     text_color: Color::from_rgb(1.0, 1.0, 1.0),
                                     ..Default::default()
                                 }),
@@ -536,7 +536,7 @@ impl Chat {
                     ].spacing(10).padding(10)
                 )
                 .style(|_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.96, 0.88, 0.90))),
+                    background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
                     ..Default::default()
                 })
             );
@@ -547,7 +547,7 @@ impl Chat {
             col = col.push(
                 container(
                     column![
-                        text("加入群组").size(16).color(Color::from_rgb(0.7, 0.2, 0.4)),
+                        text("加入群组").size(16).color(Color::from_rgb(0.5, 0.5, 0.5)),
                         text_input("群组ID或邀请码", &self.join_code)
                             .on_input(Message::JoinCodeChanged)
                             .padding(8)
@@ -556,7 +556,7 @@ impl Chat {
                             button("加入").on_press(Message::GroupOperationResult(Ok("加入群组成功".to_string())))
                                 .padding(8)
                                 .style(|_, _| iced::widget::button::Style {
-                                    background: Some(iced::Background::Color(Color::from_rgb(0.9, 0.4, 0.6))),
+                                    background: Some(iced::Background::Color(Color::from_rgb(0.7, 0.7, 0.7))),
                                     text_color: Color::from_rgb(1.0, 1.0, 1.0),
                                     ..Default::default()
                                 }),
@@ -566,7 +566,7 @@ impl Chat {
                     ].spacing(10).padding(10)
                 )
                 .style(|_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.96, 0.88, 0.90))),
+                    background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
                     ..Default::default()
                 })
             );
@@ -577,8 +577,8 @@ impl Chat {
             col = col.push(
                 container(
                     column![
-                        text("确认退出群组?").size(16).color(Color::from_rgb(0.7, 0.2, 0.4)),
-                        text("退出后将无法接收该群组的消息").size(14).color(Color::from_rgb(0.5, 0.3, 0.4)),
+                        text("确认退出群组?").size(16).color(Color::from_rgb(0.5, 0.5, 0.5)),
+                        text("退出后将无法接收该群组的消息").size(14).color(Color::from_rgb(0.6, 0.6, 0.6)),
                         row![
                             button("确认退出").on_press(Message::ConfirmLeaveGroup(*group_id))
                                 .padding(8)
@@ -593,7 +593,7 @@ impl Chat {
                     ].spacing(10).padding(10)
                 )
                 .style(|_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.96, 0.88, 0.90))),
+                    background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
                     ..Default::default()
                 })
             );
@@ -610,8 +610,8 @@ impl Chat {
                     .take(20)
                     .collect::<String>();
                 let item = column![
-                    text(&g.name).size(16).color(Color::from_rgb(0.6, 0.1, 0.3)),
-                    text(preview).size(13).color(Color::from_rgb(0.5, 0.3, 0.4))
+                    text(&g.name).size(16).color(Color::from_rgb(0.5, 0.5, 0.5)),
+                    text(preview).size(13).color(Color::from_rgb(0.6, 0.6, 0.6))
                 ].spacing(4);
                 let btn = button(item)
                     .on_press(Message::SelectGroup(g.id))
@@ -622,7 +622,7 @@ impl Chat {
                     button("退出").on_press(Message::LeaveGroup(g.id))
                         .padding(4)
                         .style(|_, _| iced::widget::button::Style {
-                            background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.2, 0.4))),
+                            background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.2, 0.2))),
                             text_color: Color::from_rgb(1.0, 1.0, 1.0),
                             ..Default::default()
                         })
@@ -634,14 +634,14 @@ impl Chat {
                 });
             }
         } else {
-            col = col.push(text("加载中...").size(14).color(Color::from_rgb(0.5, 0.3, 0.4)));
+            col = col.push(text("加载中...").size(14).color(Color::from_rgb(0.6, 0.6, 0.6)));
         }
 
         container(scrollable(col))
             .width(220)
             .height(Length::Fill)
             .style(|_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(Color::from_rgb(0.98, 0.92, 0.94))),
+                background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
                 ..Default::default()
             })
             .into()
@@ -671,7 +671,7 @@ impl Chat {
             } else {
                 let name_label = text(&msg.sender_name)
                     .size(12)
-                    .color(Color::from_rgb(0.9, 0.3, 0.5));
+                    .color(Color::from_rgb(0.5, 0.5, 0.5));
                 let with_name = column![name_label, bubble].spacing(4);
                 row![with_name, iced::widget::Space::new().width(Length::Fill)]
             };

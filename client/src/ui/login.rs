@@ -204,7 +204,7 @@ impl Login {
         }
 
         if let Some(error) = &self.error {
-            content = content.push(text(error).size(14));
+            content = content.push(text(error).size(14).color(iced::Color::from_rgb(0.8, 0.2, 0.2)));
         }
 
         let submit_button = match self.view_state {
