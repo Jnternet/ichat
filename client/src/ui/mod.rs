@@ -18,12 +18,12 @@ fn custom_theme() -> Theme {
     let custom_palette = Palette {
         background: color!(0xffffff),
         text: color!(0x000000),
-        primary: color!(0x2e7d32), // 绿色代替蓝色
-        success: color!(0x12664f),
-        warning: color!(0xb77e33),
-        danger: color!(0xc3423f),
+        primary: color!(0xe91e63),   // 粉色
+        success: color!(0xf48fb1),    // 浅粉色
+        warning: color!(0xb77e33),    // 橙色
+        danger: color!(0xc3423f),     // 红色
     };
-    Theme::custom("NoBlueTheme", custom_palette)
+    Theme::custom("PinkTheme", custom_palette)
 }
 
 struct AppState {

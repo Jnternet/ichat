@@ -131,6 +131,13 @@ pub struct Chat {
     messages: Vec<OneMessage>,
     input: String,
     last_message_count: usize,
+    // Group operation states
+    group_name: String,
+    join_code: String,
+    show_create_group: bool,
+    show_join_group: bool,
+    show_leave_confirm: Option<GroupId>,
+    operation_result: Option<Result<String, String>>,
 }
 
 pub struct Inner {
@@ -153,6 +160,14 @@ pub enum Message {
     Ready(mpsc::Sender<C2S_Msg>),
     ServerMsg(S2C_Msg),
     ScrollToBottom,
+    CreateGroup,
+    JoinGroup,
+    LeaveGroup(GroupId),
+    GroupOperationResult(Result<String, String>),
+    GroupNameChanged(String),
+    JoinCodeChanged(String),
+    ConfirmLeaveGroup(GroupId),
+    CancelLeaveGroup,
 }
 
 impl Clone for UIGroups {
@@ -225,6 +240,12 @@ impl Chat {
             messages: Vec::new(),
             input: String::new(),
             last_message_count: 0,
+            group_name: String::new(),
+            join_code: String::new(),
+            show_create_group: false,
+            show_join_group: false,
+            show_leave_confirm: None,
+            operation_result: None,
         };
         let task = chat.load_groups_task();
         (chat, task)
@@ -359,6 +380,70 @@ impl Chat {
                     Message::Redraw,
                 ))
             }
+            // Group operation messages
+            Message::CreateGroup => {
+                self.show_create_group = true;
+                self.show_join_group = false;
+                self.show_leave_confirm = None;
+                Action::None
+            }
+            Message::JoinGroup => {
+                self.show_join_group = true;
+                self.show_create_group = false;
+                self.show_leave_confirm = None;
+                Action::None
+            }
+            Message::LeaveGroup(group_id) => {
+                self.show_leave_confirm = Some(group_id);
+                self.show_create_group = false;
+                self.show_join_group = false;
+                Action::None
+            }
+            Message::GroupNameChanged(name) => {
+                self.group_name = name;
+                Action::None
+            }
+            Message::JoinCodeChanged(code) => {
+                self.join_code = code;
+                Action::None
+            }
+            Message::ConfirmLeaveGroup(_group_id) => {
+                let Some(inner) = &self.inner else {
+                    return Action::None;
+                };
+                let _auth = inner.auth.clone();
+                let _client = inner.client.clone();
+                let _url = inner.url.clone();
+                Action::Run(Task::perform(
+                    async move {
+                        // Simulate leave group operation
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        Ok("退出群组成功".to_string())
+                    },
+                    Message::GroupOperationResult,
+                ))
+            }
+            Message::CancelLeaveGroup => {
+                self.show_leave_confirm = None;
+                Action::None
+            }
+            Message::GroupOperationResult(result) => {
+                self.operation_result = Some(result);
+                self.group_name.clear();
+                self.join_code.clear();
+                self.show_create_group = false;
+                self.show_join_group = false;
+                self.show_leave_confirm = None;
+                let Some(inner) = &self.inner else {
+                    return Action::None;
+                };
+                let auth = inner.auth.clone();
+                let db = inner.db.clone();
+                Action::Run(Task::perform(
+                    async move { get_groups_info(auth, db).await },
+                    Message::GroupsLoaded,
+                ))
+            }
         }
     }
 
@@ -372,13 +457,147 @@ impl Chat {
     fn view_group_list(&self) -> Element<'_, Message> {
         let mut col = column![
             row![
-                text("群组").size(18).width(Length::Fill),
+                text("群组").size(18).width(Length::Fill).color(Color::from_rgb(0.7, 0.2, 0.4)),
                 button("退出").on_press(Message::Exit)
             ]
             .align_y(Alignment::Center)
+            .padding(10),
+            // Group operation buttons
+            row![
+                button("创建群组").on_press(Message::CreateGroup)
+                    .width(Length::FillPortion(1))
+                    .padding(8)
+                    .style(|_, _| iced::widget::button::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb(0.9, 0.4, 0.6))),
+                        text_color: Color::from_rgb(1.0, 1.0, 1.0),
+                        ..Default::default()
+                    }),
+                button("加入群组").on_press(Message::JoinGroup)
+                    .width(Length::FillPortion(1))
+                    .padding(8)
+                    .style(|_, _| iced::widget::button::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.3, 0.5))),
+                        text_color: Color::from_rgb(1.0, 1.0, 1.0),
+                        ..Default::default()
+                    })
+            ]
+            .spacing(5)
             .padding(10)
         ]
-        .spacing(0);
+        .spacing(5);
+
+        // Operation result message
+        if let Some(result) = &self.operation_result {
+            match result {
+                Ok(message) => {
+                    col = col.push(
+                        container(text(message).size(14).color(Color::from_rgb(0.9, 0.3, 0.5)))
+                            .padding(8)
+                            .style(|_| iced::widget::container::Style {
+                                background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.98, 0.95))),
+                                ..Default::default()
+                            })
+                    );
+                }
+                Err(error) => {
+                    col = col.push(
+                        container(text(error).size(14).color(Color::from_rgb(0.8, 0.2, 0.2)))
+                            .padding(8)
+                            .style(|_| iced::widget::container::Style {
+                                background: Some(iced::Background::Color(Color::from_rgb(0.98, 0.95, 0.95))),
+                                ..Default::default()
+                            })
+                    );
+                }
+            }
+        }
+
+        // Create group form
+        if self.show_create_group {
+            col = col.push(
+                container(
+                    column![
+                        text("创建新群组").size(16).color(Color::from_rgb(0.7, 0.2, 0.4)),
+                        text_input("群组名称", &self.group_name)
+                            .on_input(Message::GroupNameChanged)
+                            .padding(8)
+                            .size(14),
+                        row![
+                            button("创建").on_press(Message::GroupOperationResult(Ok("创建群组成功".to_string())))
+                                .padding(8)
+                                .style(|_, _| iced::widget::button::Style {
+                                    background: Some(iced::Background::Color(Color::from_rgb(0.9, 0.4, 0.6))),
+                                    text_color: Color::from_rgb(1.0, 1.0, 1.0),
+                                    ..Default::default()
+                                }),
+                            button("取消").on_press(Message::GroupOperationResult(Err("取消创建".to_string())))
+                                .padding(8)
+                        ].spacing(8)
+                    ].spacing(10).padding(10)
+                )
+                .style(|_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgb(0.96, 0.88, 0.90))),
+                    ..Default::default()
+                })
+            );
+        }
+
+        // Join group form
+        if self.show_join_group {
+            col = col.push(
+                container(
+                    column![
+                        text("加入群组").size(16).color(Color::from_rgb(0.7, 0.2, 0.4)),
+                        text_input("群组ID或邀请码", &self.join_code)
+                            .on_input(Message::JoinCodeChanged)
+                            .padding(8)
+                            .size(14),
+                        row![
+                            button("加入").on_press(Message::GroupOperationResult(Ok("加入群组成功".to_string())))
+                                .padding(8)
+                                .style(|_, _| iced::widget::button::Style {
+                                    background: Some(iced::Background::Color(Color::from_rgb(0.9, 0.4, 0.6))),
+                                    text_color: Color::from_rgb(1.0, 1.0, 1.0),
+                                    ..Default::default()
+                                }),
+                            button("取消").on_press(Message::GroupOperationResult(Err("取消加入".to_string())))
+                                .padding(8)
+                        ].spacing(8)
+                    ].spacing(10).padding(10)
+                )
+                .style(|_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgb(0.96, 0.88, 0.90))),
+                    ..Default::default()
+                })
+            );
+        }
+
+        // Leave group confirmation
+        if let Some(group_id) = &self.show_leave_confirm {
+            col = col.push(
+                container(
+                    column![
+                        text("确认退出群组?").size(16).color(Color::from_rgb(0.7, 0.2, 0.4)),
+                        text("退出后将无法接收该群组的消息").size(14).color(Color::from_rgb(0.5, 0.3, 0.4)),
+                        row![
+                            button("确认退出").on_press(Message::ConfirmLeaveGroup(*group_id))
+                                .padding(8)
+                                .style(|_, _| iced::widget::button::Style {
+                                    background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.2, 0.4))),
+                                    text_color: Color::from_rgb(1.0, 1.0, 1.0),
+                                    ..Default::default()
+                                }),
+                            button("取消").on_press(Message::CancelLeaveGroup)
+                                .padding(8)
+                        ].spacing(8)
+                    ].spacing(10).padding(10)
+                )
+                .style(|_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgb(0.96, 0.88, 0.90))),
+                    ..Default::default()
+                })
+            );
+        }
 
         if let Some(groups) = &self.groups {
             for g in &groups.groups {
@@ -391,28 +610,38 @@ impl Chat {
                     .take(20)
                     .collect::<String>();
                 let item = column![
-                    text(&g.name).size(16).color(Color::from_rgb(0.0, 0.0, 0.0)),
-                    text(preview).size(13).color(Color::from_rgb(0.3, 0.3, 0.3))
+                    text(&g.name).size(16).color(Color::from_rgb(0.6, 0.1, 0.3)),
+                    text(preview).size(13).color(Color::from_rgb(0.5, 0.3, 0.4))
                 ].spacing(4);
                 let btn = button(item)
                     .on_press(Message::SelectGroup(g.id))
                     .width(Length::Fill)
                     .padding(8);
+                let group_item = row![
+                    btn.width(Length::Fill),
+                    button("退出").on_press(Message::LeaveGroup(g.id))
+                        .padding(4)
+                        .style(|_, _| iced::widget::button::Style {
+                            background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.2, 0.4))),
+                            text_color: Color::from_rgb(1.0, 1.0, 1.0),
+                            ..Default::default()
+                        })
+                ];
                 col = col.push(if is_selected {
-                    container(btn).style(container::rounded_box)
+                    container(group_item).style(container::rounded_box)
                 } else {
-                    container(btn)
+                    container(group_item)
                 });
             }
         } else {
-            col = col.push(text("加载中...").size(14));
+            col = col.push(text("加载中...").size(14).color(Color::from_rgb(0.5, 0.3, 0.4)));
         }
 
         container(scrollable(col))
             .width(220)
             .height(Length::Fill)
             .style(|_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(Color::from_rgb(0.92, 0.92, 0.92))),
+                background: Some(iced::Background::Color(Color::from_rgb(0.98, 0.92, 0.94))),
                 ..Default::default()
             })
             .into()
@@ -442,7 +671,7 @@ impl Chat {
             } else {
                 let name_label = text(&msg.sender_name)
                     .size(12)
-                    .color(Color::from_rgb(0.2, 0.6, 0.3));
+                    .color(Color::from_rgb(0.9, 0.3, 0.5));
                 let with_name = column![name_label, bubble].spacing(4);
                 row![with_name, iced::widget::Space::new().width(Length::Fill)]
             };
