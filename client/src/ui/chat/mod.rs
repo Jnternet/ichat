@@ -5,7 +5,7 @@ use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info};
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
-use iced::{Alignment, Element, Length, Subscription, Task, Color};
+use iced::{Alignment, Color, Element, Length, Subscription, Task};
 use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
@@ -350,9 +350,7 @@ impl Chat {
                 }
                 Action::None
             }
-            Message::ScrollToBottom => {
-                Action::None
-            }
+            Message::ScrollToBottom => Action::None,
             Message::Ready(tx) => {
                 if let Some(inner) = &mut self.inner {
                     inner.msg_tx = Some(tx);
@@ -457,26 +455,31 @@ impl Chat {
     fn view_group_list(&self) -> Element<'_, Message> {
         let mut col = column![
             row![
-                text("群组").size(18).width(Length::Fill).color(Color::from_rgb(0.5, 0.5, 0.5)),
+                text("群组")
+                    .size(18)
+                    .width(Length::Fill)
+                    .color(Color::from_rgb(0.1, 0.1, 0.1)),
                 button("退出").on_press(Message::Exit)
             ]
             .align_y(Alignment::Center)
             .padding(10),
             // Group operation buttons
             row![
-                button("创建群组").on_press(Message::CreateGroup)
+                button("创建群组")
+                    .on_press(Message::CreateGroup)
                     .width(Length::FillPortion(1))
                     .padding(8)
                     .style(|_, _| iced::widget::button::Style {
-                        background: Some(iced::Background::Color(Color::from_rgb(0.7, 0.7, 0.7))),
+                        background: Some(iced::Background::Color(Color::from_rgb(0.3, 0.3, 0.3))),
                         text_color: Color::from_rgb(1.0, 1.0, 1.0),
                         ..Default::default()
                     }),
-                button("加入群组").on_press(Message::JoinGroup)
+                button("加入群组")
+                    .on_press(Message::JoinGroup)
                     .width(Length::FillPortion(1))
                     .padding(8)
                     .style(|_, _| iced::widget::button::Style {
-                        background: Some(iced::Background::Color(Color::from_rgb(0.6, 0.6, 0.6))),
+                        background: Some(iced::Background::Color(Color::from_rgb(0.4, 0.4, 0.4))),
                         text_color: Color::from_rgb(1.0, 1.0, 1.0),
                         ..Default::default()
                     })
@@ -491,12 +494,14 @@ impl Chat {
             match result {
                 Ok(message) => {
                     col = col.push(
-                        container(text(message).size(14).color(Color::from_rgb(0.5, 0.5, 0.5)))
+                        container(text(message).size(14).color(Color::from_rgb(0.2, 0.2, 0.2)))
                             .padding(8)
                             .style(|_| iced::widget::container::Style {
-                                background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
+                                background: Some(iced::Background::Color(Color::from_rgb(
+                                    0.9, 0.9, 0.9,
+                                ))),
                                 ..Default::default()
-                            })
+                            }),
                     );
                 }
                 Err(error) => {
@@ -504,9 +509,11 @@ impl Chat {
                         container(text(error).size(14).color(Color::from_rgb(0.8, 0.2, 0.2)))
                             .padding(8)
                             .style(|_| iced::widget::container::Style {
-                                background: Some(iced::Background::Color(Color::from_rgb(0.98, 0.95, 0.95))),
+                                background: Some(iced::Background::Color(Color::from_rgb(
+                                    0.98, 0.95, 0.95,
+                                ))),
                                 ..Default::default()
-                            })
+                            }),
                     );
                 }
             }
@@ -517,28 +524,41 @@ impl Chat {
             col = col.push(
                 container(
                     column![
-                        text("创建新群组").size(16).color(Color::from_rgb(0.5, 0.5, 0.5)),
+                        text("创建新群组")
+                            .size(16)
+                            .color(Color::from_rgb(0.1, 0.1, 0.1)),
                         text_input("群组名称", &self.group_name)
                             .on_input(Message::GroupNameChanged)
                             .padding(8)
                             .size(14),
                         row![
-                            button("创建").on_press(Message::GroupOperationResult(Ok("创建群组成功".to_string())))
+                            button("创建")
+                                .on_press(Message::GroupOperationResult(Ok(
+                                    "创建群组成功".to_string()
+                                )))
                                 .padding(8)
                                 .style(|_, _| iced::widget::button::Style {
-                                    background: Some(iced::Background::Color(Color::from_rgb(0.7, 0.7, 0.7))),
+                                    background: Some(iced::Background::Color(Color::from_rgb(
+                                        0.3, 0.3, 0.3
+                                    ))),
                                     text_color: Color::from_rgb(1.0, 1.0, 1.0),
                                     ..Default::default()
                                 }),
-                            button("取消").on_press(Message::GroupOperationResult(Err("取消创建".to_string())))
+                            button("取消")
+                                .on_press(Message::GroupOperationResult(
+                                    Err("取消创建".to_string())
+                                ))
                                 .padding(8)
-                        ].spacing(8)
-                    ].spacing(10).padding(10)
+                        ]
+                        .spacing(8)
+                    ]
+                    .spacing(10)
+                    .padding(10),
                 )
                 .style(|_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
+                    background: Some(iced::Background::Color(Color::from_rgb(0.98, 0.98, 0.98))),
                     ..Default::default()
-                })
+                }),
             );
         }
 
@@ -547,28 +567,41 @@ impl Chat {
             col = col.push(
                 container(
                     column![
-                        text("加入群组").size(16).color(Color::from_rgb(0.5, 0.5, 0.5)),
+                        text("加入群组")
+                            .size(16)
+                            .color(Color::from_rgb(0.1, 0.1, 0.1)),
                         text_input("群组ID或邀请码", &self.join_code)
                             .on_input(Message::JoinCodeChanged)
                             .padding(8)
                             .size(14),
                         row![
-                            button("加入").on_press(Message::GroupOperationResult(Ok("加入群组成功".to_string())))
+                            button("加入")
+                                .on_press(Message::GroupOperationResult(Ok(
+                                    "加入群组成功".to_string()
+                                )))
                                 .padding(8)
                                 .style(|_, _| iced::widget::button::Style {
-                                    background: Some(iced::Background::Color(Color::from_rgb(0.7, 0.7, 0.7))),
+                                    background: Some(iced::Background::Color(Color::from_rgb(
+                                        0.3, 0.3, 0.3
+                                    ))),
                                     text_color: Color::from_rgb(1.0, 1.0, 1.0),
                                     ..Default::default()
                                 }),
-                            button("取消").on_press(Message::GroupOperationResult(Err("取消加入".to_string())))
+                            button("取消")
+                                .on_press(Message::GroupOperationResult(
+                                    Err("取消加入".to_string())
+                                ))
                                 .padding(8)
-                        ].spacing(8)
-                    ].spacing(10).padding(10)
+                        ]
+                        .spacing(8)
+                    ]
+                    .spacing(10)
+                    .padding(10),
                 )
                 .style(|_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
+                    background: Some(iced::Background::Color(Color::from_rgb(0.98, 0.98, 0.98))),
                     ..Default::default()
-                })
+                }),
             );
         }
 
@@ -577,25 +610,36 @@ impl Chat {
             col = col.push(
                 container(
                     column![
-                        text("确认退出群组?").size(16).color(Color::from_rgb(0.5, 0.5, 0.5)),
-                        text("退出后将无法接收该群组的消息").size(14).color(Color::from_rgb(0.6, 0.6, 0.6)),
+                        text("确认退出群组?")
+                            .size(16)
+                            .color(Color::from_rgb(0.1, 0.1, 0.1)),
+                        text("退出后将无法接收该群组的消息")
+                            .size(14)
+                            .color(Color::from_rgb(0.3, 0.3, 0.3)),
                         row![
-                            button("确认退出").on_press(Message::ConfirmLeaveGroup(*group_id))
+                            button("确认退出")
+                                .on_press(Message::ConfirmLeaveGroup(*group_id))
                                 .padding(8)
                                 .style(|_, _| iced::widget::button::Style {
-                                    background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.2, 0.4))),
+                                    background: Some(iced::Background::Color(Color::from_rgb(
+                                        0.8, 0.2, 0.4
+                                    ))),
                                     text_color: Color::from_rgb(1.0, 1.0, 1.0),
                                     ..Default::default()
                                 }),
-                            button("取消").on_press(Message::CancelLeaveGroup)
+                            button("取消")
+                                .on_press(Message::CancelLeaveGroup)
                                 .padding(8)
-                        ].spacing(8)
-                    ].spacing(10).padding(10)
+                        ]
+                        .spacing(8)
+                    ]
+                    .spacing(10)
+                    .padding(10),
                 )
                 .style(|_| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
+                    background: Some(iced::Background::Color(Color::from_rgb(0.98, 0.98, 0.98))),
                     ..Default::default()
-                })
+                }),
             );
         }
 
@@ -610,38 +654,56 @@ impl Chat {
                     .take(20)
                     .collect::<String>();
                 let item = column![
-                    text(&g.name).size(16).color(Color::from_rgb(0.5, 0.5, 0.5)),
-                    text(preview).size(13).color(Color::from_rgb(0.6, 0.6, 0.6))
-                ].spacing(4);
+                    text(&g.name).size(16).color(Color::from_rgb(0.1, 0.1, 0.1)),
+                    text(preview).size(13).color(Color::from_rgb(0.3, 0.3, 0.3))
+                ]
+                .spacing(4);
                 let btn = button(item)
                     .on_press(Message::SelectGroup(g.id))
+                    .style(|_, _| iced::widget::button::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb(
+                            0.85, 0.85, 0.85,
+                        ))),
+                        text_color: Color::from_rgb(0.1, 0.1, 0.1),
+                        ..Default::default()
+                    })
                     .width(Length::Fill)
                     .padding(8);
                 let group_item = row![
                     btn.width(Length::Fill),
-                    button("退出").on_press(Message::LeaveGroup(g.id))
+                    button("退出")
+                        .on_press(Message::LeaveGroup(g.id))
                         .padding(4)
                         .style(|_, _| iced::widget::button::Style {
-                            background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.2, 0.2))),
+                            background: Some(iced::Background::Color(Color::from_rgb(
+                                0.8, 0.2, 0.2
+                            ))),
                             text_color: Color::from_rgb(1.0, 1.0, 1.0),
                             ..Default::default()
                         })
                 ];
-                col = col.push(if is_selected {
-                    container(group_item).style(container::rounded_box)
-                } else {
-                    container(group_item)
-                });
+                col = col.push(
+                    container(group_item).style(|_| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb(
+                            0.98, 0.98, 0.98,
+                        ))),
+                        ..Default::default()
+                    }),
+                );
             }
         } else {
-            col = col.push(text("加载中...").size(14).color(Color::from_rgb(0.6, 0.6, 0.6)));
+            col = col.push(
+                text("加载中...")
+                    .size(14)
+                    .color(Color::from_rgb(0.3, 0.3, 0.3)),
+            );
         }
 
         container(scrollable(col))
             .width(220)
             .height(Length::Fill)
             .style(|_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
+                background: Some(iced::Background::Color(Color::from_rgb(0.98, 0.98, 0.98))),
                 ..Default::default()
             })
             .into()
@@ -659,19 +721,15 @@ impl Chat {
 
         let mut msg_col = column![].spacing(12).padding(15);
         for msg in &self.messages {
-            let bubble = container(
-                text(&msg.content)
-                    .size(15)
-                    .line_height(1.5)
-            )
-            .padding(12)
-            .style(container::rounded_box);
+            let bubble = container(text(&msg.content).size(15).line_height(1.5))
+                .padding(12)
+                .style(container::rounded_box);
             let row_item = if msg.is_mine {
                 row![iced::widget::Space::new().width(Length::Fill), bubble]
             } else {
                 let name_label = text(&msg.sender_name)
                     .size(12)
-                    .color(Color::from_rgb(0.5, 0.5, 0.5));
+                    .color(Color::from_rgb(0.2, 0.2, 0.2));
                 let with_name = column![name_label, bubble].spacing(4);
                 row![with_name, iced::widget::Space::new().width(Length::Fill)]
             };
@@ -685,9 +743,7 @@ impl Chat {
                 .padding(10)
                 .size(15)
                 .width(Length::Fill),
-            button("发送")
-                .on_press(Message::SendMessage)
-                .padding(10)
+            button("发送").on_press(Message::SendMessage).padding(10)
         ]
         .spacing(10)
         .padding(12)
