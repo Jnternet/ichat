@@ -1,7 +1,7 @@
 use crate::tools;
 use crate::tools::textchat::{get_connector, get_tls_stream};
 use crate::tools::update_info::save_msg;
-use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info};
+use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info, save_join_group_to_db};
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
@@ -10,7 +10,7 @@ use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 use shared::chrono;
-use shared::group::{CreateGroupResponse, GroupId, JoinGroupResponse};
+use shared::group::{CreateGroupResponse, GroupId, JoinGroup, JoinGroupResponse};
 use shared::message::{C2S_Msg, Msg, S2C_Msg};
 use shared::serde_json;
 use std::hash::{Hash, Hasher};
@@ -407,6 +407,71 @@ impl Chat {
                 self.join_code = code;
                 Action::None
             }
+            Message::JoinGroupSubmit => {
+                let Some(inner) = &self.inner else {
+                    return Action::None;
+                };
+                let Ok(gid) = self.join_code.trim().parse::<uuid::Uuid>() else {
+                    self.operation_result = Some(Err("无效的群组ID".to_string()));
+                    return Action::None;
+                };
+                let auth = inner.auth.clone();
+                let client = inner.client.clone();
+                let url = format!("{}join_group", inner.url);
+                Action::Run(Task::perform(
+                    async move {
+                        crate::tools::group::join_group(
+                            &client,
+                            &url,
+                            &JoinGroup {
+                                auth,
+                                group_id: GroupId(gid),
+                            },
+                        )
+                        .await
+                        .unwrap_or(JoinGroupResponse::Fail(shared::group::GroupError::UnKnown))
+                    },
+                    Message::JoinGroupResponse,
+                ))
+            }
+            Message::JoinGroupResponse(resp) => match resp {
+                JoinGroupResponse::Fail(e) => {
+                    self.operation_result = Some(Err(format!("加入失败: {}", e)));
+                    self.show_join_group = false;
+                    Action::None
+                }
+                JoinGroupResponse::Success(success) => {
+                    self.show_join_group = false;
+                    self.join_code.clear();
+                    let Some(inner) = &self.inner else {
+                        return Action::None;
+                    };
+                    let db = inner.db.clone();
+                    let auth = inner.auth.clone();
+                    let client = inner.client.clone();
+                    let url = format!("{}get_group", inner.url);
+                    Action::Run(Task::perform(
+                        async move {
+                            let group_name = crate::tools::group::get_group(
+                                &client,
+                                &url,
+                                &shared::group::GetGroup {
+                                    auth: auth.clone(),
+                                    group_id: success.gid,
+                                },
+                            )
+                            .await
+                            .ok()
+                            .and_then(|r| r.success())
+                            .map(|g| g.group.name)
+                            .unwrap_or_default();
+                            let _ = save_join_group_to_db(&db, &success, group_name).await;
+                            get_groups_info(auth, db).await
+                        },
+                        Message::GroupsLoaded,
+                    ))
+                }
+            },
             Message::ConfirmLeaveGroup(_group_id) => {
                 let Some(inner) = &self.inner else {
                     return Action::None;
@@ -578,9 +643,7 @@ impl Chat {
                             .size(14),
                         row![
                             button("加入")
-                                .on_press(Message::GroupOperationResult(Ok(
-                                    "加入群组成功".to_string()
-                                )))
+                                .on_press(Message::JoinGroupSubmit)
                                 .padding(8)
                                 .style(|_, _| iced::widget::button::Style {
                                     background: Some(iced::Background::Color(Color::from_rgb(

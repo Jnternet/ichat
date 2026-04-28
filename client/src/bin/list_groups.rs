@@ -93,4 +93,3 @@ async fn list_groups(
     }
     bail!("cannot resolve response")
 }
-

@@ -1,11 +1,11 @@
 use crate::entity::{account_group, accounts, groups, messages};
 use sea_orm::prelude::DateTimeUtc;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    QueryOrder, Set, TransactionTrait,
 };
 use shared::auth::Auth;
-use shared::group::GroupId;
+use shared::group::{GroupId, JoinGroupSuccess};
 use std::collections::VecDeque;
 
 pub struct OneGroup {
@@ -93,6 +93,50 @@ async fn get_one_group(db: &impl ConnectionTrait, id: GroupId) -> Result<OneGrou
         last_msg,
         last_msg_time,
     })
+}
+
+pub(super) async fn save_join_group_to_db(
+    db: &DatabaseConnection,
+    success: &JoinGroupSuccess,
+    group_name: String,
+) -> Result<(), String> {
+    let gid = success.gid.0;
+    let uid = success.uid.0;
+
+    if groups::Entity::find_by_id(gid)
+        .one(db)
+        .await
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        groups::ActiveModel {
+            uuid: Set(gid),
+            group_name: Set(group_name),
+        }
+        .insert(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    if account_group::Entity::find()
+        .filter(account_group::Column::AccountUuid.eq(uid))
+        .filter(account_group::Column::GroupUuid.eq(gid))
+        .one(db)
+        .await
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        account_group::ActiveModel {
+            account_uuid: Set(uid),
+            group_uuid: Set(gid),
+            last_known: Set(None),
+        }
+        .insert(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 pub(super) async fn get_group_messages(

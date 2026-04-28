@@ -3,9 +3,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{Json, response::IntoResponse, routing::post};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, EntityTrait, QueryFilter, TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, EntityTrait, QueryFilter, TransactionTrait};
 use shared::register::{Register, RegisterSuccess};
 
 // 从 axum 模块导入 AppState

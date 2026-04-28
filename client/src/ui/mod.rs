@@ -16,12 +16,12 @@ pub fn run() -> iced::Result {
 fn custom_theme() -> Theme {
     use iced::theme::Palette;
     let custom_palette = Palette {
-        background: color!(0xffffff),    // 白色背景
-        text: color!(0x212529),          // 深黑色文本
-        primary: color!(0x495057),       // 深灰色主色调
-        success: color!(0x5c636a),       // 中灰色成功色
-        warning: color!(0x868e96),       // 浅灰色警告色
-        danger: color!(0xc3423f),        // 红色错误色（保持不变）
+        background: color!(0xffffff), // 白色背景
+        text: color!(0x212529),       // 深黑色文本
+        primary: color!(0x495057),    // 深灰色主色调
+        success: color!(0x5c636a),    // 中灰色成功色
+        warning: color!(0x868e96),    // 浅灰色警告色
+        danger: color!(0xc3423f),     // 红色错误色（保持不变）
     };
     Theme::custom("GrayTheme", custom_palette)
 }

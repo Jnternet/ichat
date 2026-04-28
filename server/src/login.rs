@@ -6,8 +6,8 @@ use axum::{Json, response::IntoResponse, routing::post};
 use sea_orm::ConnectionTrait;
 use sea_orm::EntityTrait;
 use sea_orm::QueryFilter;
+use sea_orm::TransactionTrait;
 use sea_orm::{ActiveModelTrait, Set};
-use sea_orm::{TransactionTrait};
 use shared::auth::Auth;
 use shared::login::*;
 

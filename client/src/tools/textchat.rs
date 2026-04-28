@@ -21,8 +21,14 @@ pub async fn text_chat(
 
     let connector = get_connector();
     let mut tls_stream = match get_tls_stream(&connector, &server_addr, &server_name).await {
-        Ok(s) => { eprintln!("[textchat] TLS 连接成功"); s }
-        Err(e) => { eprintln!("[textchat] TLS 连接失败: {:?}", e); return Err(e); }
+        Ok(s) => {
+            eprintln!("[textchat] TLS 连接成功");
+            s
+        }
+        Err(e) => {
+            eprintln!("[textchat] TLS 连接失败: {:?}", e);
+            return Err(e);
+        }
     };
 
     let auth_json = serde_json::to_vec(&auth)?;
@@ -47,15 +53,25 @@ pub async fn text_chat(
                     break;
                 }
                 Ok(n) => {
-                    eprintln!("[textchat] 收到 {} bytes，buf 总长 {}: {:?}", n, buf.len(), &buf[..]);
+                    eprintln!(
+                        "[textchat] 收到 {} bytes，buf 总长 {}: {:?}",
+                        n,
+                        buf.len(),
+                        &buf[..]
+                    );
                     let msg = serde_json::from_slice::<shared::message::S2C_Msg>(&buf);
                     match msg {
                         Ok(s2c_msg) => {
                             eprintln!("[textchat] 解析消息成功，保存到 db");
                             buf.clear();
                             match save_msg(&db_, &s2c_msg).await {
-                                Ok(_) => { s.send(()).await.unwrap(); }
-                                Err(e) => { eprintln!("[textchat] 保存消息失败: {:?}", e); break; }
+                                Ok(_) => {
+                                    s.send(()).await.unwrap();
+                                }
+                                Err(e) => {
+                                    eprintln!("[textchat] 保存消息失败: {:?}", e);
+                                    break;
+                                }
                             }
                         }
                         Err(e) => {
@@ -82,11 +98,19 @@ pub async fn text_chat(
             eprintln!("[textchat] 发送消息 {} bytes", b.len());
             match wh.write_all(&b).await {
                 Ok(_) => {}
-                Err(e) => { eprintln!("[textchat] 发送失败: {:?}", e); break; }
+                Err(e) => {
+                    eprintln!("[textchat] 发送失败: {:?}", e);
+                    break;
+                }
             }
             match wh.flush().await {
-                Ok(_) => { eprintln!("[textchat] 消息发送并 flush 完毕"); }
-                Err(e) => { eprintln!("[textchat] flush 失败: {:?}", e); break; }
+                Ok(_) => {
+                    eprintln!("[textchat] 消息发送并 flush 完毕");
+                }
+                Err(e) => {
+                    eprintln!("[textchat] flush 失败: {:?}", e);
+                    break;
+                }
             }
         }
         eprintln!("[textchat] 发送任务退出");
