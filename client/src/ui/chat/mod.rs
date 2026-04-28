@@ -10,7 +10,7 @@ use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 use shared::chrono;
-use shared::group::GroupId;
+use shared::group::{CreateGroupResponse, GroupId, JoinGroupResponse};
 use shared::message::{C2S_Msg, Msg, S2C_Msg};
 use shared::serde_json;
 use std::hash::{Hash, Hasher};
@@ -66,6 +66,8 @@ pub enum Message {
     JoinCodeChanged(String),
     ConfirmLeaveGroup(GroupId),
     CancelLeaveGroup,
+    JoinGroupSubmit,
+    JoinGroupResponse(JoinGroupResponse),
 }
 
 // ── subscription 的 data 类型，实现 Hash 供 run_with 去重 ──────────────────

@@ -24,7 +24,7 @@ pub struct JoinGroup {
     pub auth: Auth,
     pub group_id: GroupId,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct JoinGroupSuccess {
     pub uid: AccountId,
     pub gid: GroupId,
@@ -65,7 +65,7 @@ pub struct GetGroupSuccess {
     pub group: Group,
 }
 
-#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, thiserror::Error, Serialize, Deserialize, Clone)]
 pub enum GroupError {
     #[error("You have no permission to do this behavior")]
     NoPermission,
@@ -81,7 +81,7 @@ pub enum CreateGroupResponse {
     Fail(GroupError),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum JoinGroupResponse {
     Success(JoinGroupSuccess),
     Fail(GroupError),
