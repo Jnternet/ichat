@@ -10,7 +10,7 @@ use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 use shared::chrono;
-use shared::group::{CreateGroupResponse, GroupId, JoinGroup, JoinGroupResponse};
+use shared::group::{CreateGroup, CreateGroupResponse, GroupId, JoinGroup, JoinGroupResponse};
 use shared::message::{C2S_Msg, Msg, S2C_Msg};
 use shared::serde_json;
 use std::hash::{Hash, Hasher};
@@ -68,6 +68,8 @@ pub enum Message {
     CancelLeaveGroup,
     JoinGroupSubmit,
     JoinGroupResponse(JoinGroupResponse),
+    CreateGroupSubmit,
+    CreateGroupResponse(CreateGroupResponse),
 }
 
 // ── subscription 的 data 类型，实现 Hash 供 run_with 去重 ──────────────────
@@ -151,19 +153,23 @@ fn textchat_stream(data: &SubData) -> iced::futures::stream::BoxStream<'static, 
                     }
                     result = rh.read_buf(&mut buf) => {
                         match result {
-                            Ok(0) => { eprintln!("[sub] 服务器关闭连接"); break; }
+                            Ok(0) => { break; }
                             Ok(_) => {
                                 match serde_json::from_slice::<S2C_Msg>(&buf) {
                                     Ok(msg) => {
                                         buf.clear();
                                         let _ = output.send(Message::ServerMsg(msg)).await;
                                     }
-                                    Err(e) => {
-                                        eprintln!("[sub] 解析失败 ({} bytes): {e}", buf.len());
-                                    }
+                                    Err(_) => {}
                                 }
                             }
-                            Err(e) => { eprintln!("[sub] 读取失败: {e}"); break; }
+                            Err(e) => {
+                                let is_close_notify = e.to_string().contains("close_notify");
+                                if !is_close_notify {
+                                    eprintln!("[sub] 读取失败: {e}");
+                                }
+                                break;
+                            }
                         }
                     }
                 }
@@ -403,6 +409,61 @@ impl Chat {
                 self.group_name = name;
                 Action::None
             }
+            Message::CreateGroupSubmit => {
+                let Some(inner) = &self.inner else {
+                    return Action::None;
+                };
+                if self.group_name.trim().is_empty() {
+                    self.operation_result = Some(Err("群组名称不能为空".to_string()));
+                    return Action::None;
+                }
+                let auth = inner.auth.clone();
+                let client = inner.client.clone();
+                let url = format!("{}create_group", inner.url);
+                let name = self.group_name.trim().to_string();
+                Action::Run(Task::perform(
+                    async move {
+                        crate::tools::group::create_group(
+                            &client,
+                            &url,
+                            &CreateGroup { auth, name },
+                        )
+                        .await
+                        .unwrap_or(CreateGroupResponse::Fail(
+                            shared::group::GroupError::UnKnown,
+                        ))
+                    },
+                    Message::CreateGroupResponse,
+                ))
+            }
+            Message::CreateGroupResponse(resp) => match resp {
+                CreateGroupResponse::Fail(e) => {
+                    self.operation_result = Some(Err(format!("创建失败: {}", e)));
+                    self.show_create_group = false;
+                    Action::None
+                }
+                CreateGroupResponse::Success(success) => {
+                    self.show_create_group = false;
+                    let Some(inner) = &self.inner else {
+                        return Action::None;
+                    };
+                    let db = inner.db.clone();
+                    let auth = inner.auth.clone();
+                    let uid = auth.account_id();
+                    let group_name = std::mem::take(&mut self.group_name);
+                    Action::Run(Task::perform(
+                        async move {
+                            let fake_success = shared::group::JoinGroupSuccess {
+                                uid: shared::account::AccountId(uid),
+                                gid: success.group_id,
+                            };
+                            let _ = save_join_group_to_db(&db, &fake_success, group_name).await;
+                            get_groups_info(auth, db).await
+                        },
+                        Message::GroupsLoaded,
+                    ))
+                }
+            },
             Message::JoinCodeChanged(code) => {
                 self.join_code = code;
                 Action::None
@@ -600,9 +661,7 @@ impl Chat {
                             .size(14),
                         row![
                             button("创建")
-                                .on_press(Message::GroupOperationResult(Ok(
-                                    "创建群组成功".to_string()
-                                )))
+                                .on_press(Message::CreateGroupSubmit)
                                 .padding(8)
                                 .style(|_, _| iced::widget::button::Style {
                                     background: Some(iced::Background::Color(Color::from_rgb(

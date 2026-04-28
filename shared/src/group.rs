@@ -14,7 +14,7 @@ pub struct CreateGroup {
     pub auth: Auth,
     pub name: String,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CreateGroupSuccess {
     pub group_id: GroupId,
 }
@@ -75,7 +75,7 @@ pub enum GroupError {
     UnKnown,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum CreateGroupResponse {
     Success(CreateGroupSuccess),
     Fail(GroupError),
