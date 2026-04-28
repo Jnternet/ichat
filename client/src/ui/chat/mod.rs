@@ -447,17 +447,29 @@ impl Chat {
                     let Some(inner) = &self.inner else {
                         return Action::None;
                     };
-                    let db = inner.db.clone();
                     let auth = inner.auth.clone();
-                    let uid = auth.account_id();
+                    let client = inner.client.clone();
+                    let url = format!("{}join_group", inner.url);
                     let group_name = std::mem::take(&mut self.group_name);
+                    let db = inner.db.clone();
                     Action::Run(Task::perform(
                         async move {
-                            let fake_success = shared::group::JoinGroupSuccess {
-                                uid: shared::account::AccountId(uid),
-                                gid: success.group_id,
-                            };
-                            let _ = save_join_group_to_db(&db, &fake_success, group_name).await;
+                            let resp = crate::tools::group::join_group(
+                                &client,
+                                &url,
+                                &JoinGroup {
+                                    auth: auth.clone(),
+                                    group_id: success.group_id,
+                                },
+                            )
+                            .await
+                            .unwrap_or(JoinGroupResponse::Fail(shared::group::GroupError::UnKnown));
+                            match resp {
+                                JoinGroupResponse::Success(s) => {
+                                    let _ = save_join_group_to_db(&db, &s, group_name).await;
+                                }
+                                JoinGroupResponse::Fail(_) => {}
+                            }
                             get_groups_info(auth, db).await
                         },
                         Message::GroupsLoaded,

@@ -126,6 +126,22 @@ pub(super) async fn save_join_group_to_db(
         .map_err(|e| e.to_string())?
         .is_none()
     {
+        if accounts::Entity::find_by_id(uid)
+            .one(db)
+            .await
+            .map_err(|e| e.to_string())?
+            .is_none()
+        {
+            accounts::ActiveModel {
+                uuid: Set(uid),
+                user_name: Set(String::new()),
+                account: Set(uid.to_string()),
+            }
+            .insert(db)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+
         account_group::ActiveModel {
             account_uuid: Set(uid),
             group_uuid: Set(gid),
