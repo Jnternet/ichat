@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::auth::Auth;
+use crate::{account::AccountId, auth::Auth};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Group {
@@ -15,7 +15,9 @@ pub struct CreateGroup {
     pub name: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CreateGroupSuccess;
+pub struct CreateGroupSuccess {
+    pub group_id: GroupId,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JoinGroup {
@@ -23,7 +25,10 @@ pub struct JoinGroup {
     pub group_id: GroupId,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct JoinGroupSuccess;
+pub struct JoinGroupSuccess {
+    pub uid: AccountId,
+    pub gid: GroupId,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExitGroup {

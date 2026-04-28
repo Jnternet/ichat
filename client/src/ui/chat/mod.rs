@@ -19,6 +19,55 @@ use tokio::sync::mpsc;
 
 mod chat_util;
 
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+#[derive(Default)]
+pub struct Chat {
+    pub inner: Option<Inner>,
+    groups: Option<UIGroups>,
+    selected_group: Option<GroupId>,
+    messages: Vec<OneMessage>,
+    input: String,
+    last_message_count: usize,
+    // Group operation states
+    group_name: String,
+    join_code: String,
+    show_create_group: bool,
+    show_join_group: bool,
+    show_leave_confirm: Option<GroupId>,
+    operation_result: Option<Result<String, String>>,
+}
+
+pub struct Inner {
+    auth: Auth,
+    db: DatabaseConnection,
+    client: Client,
+    url: String,
+    msg_tx: Option<mpsc::Sender<C2S_Msg>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    GroupsLoaded(Result<UIGroups, String>),
+    SelectGroup(GroupId),
+    MessagesLoaded(Result<Vec<OneMessage>, String>),
+    InputChanged(String),
+    SendMessage,
+    Exit,
+    Redraw((UIGroups, Vec<OneMessage>)),
+    Ready(mpsc::Sender<C2S_Msg>),
+    ServerMsg(S2C_Msg),
+    ScrollToBottom,
+    CreateGroup,
+    JoinGroup,
+    LeaveGroup(GroupId),
+    GroupOperationResult(Result<String, String>),
+    GroupNameChanged(String),
+    JoinCodeChanged(String),
+    ConfirmLeaveGroup(GroupId),
+    CancelLeaveGroup,
+}
+
 // ── subscription 的 data 类型，实现 Hash 供 run_with 去重 ──────────────────
 
 #[derive(Clone)]
@@ -119,55 +168,6 @@ fn textchat_stream(data: &SubData) -> iced::futures::stream::BoxStream<'static, 
             }
         },
     ))
-}
-
-// ── Chat ──────────────────────────────────────────────────────────────────────
-
-#[derive(Default)]
-pub struct Chat {
-    pub inner: Option<Inner>,
-    groups: Option<UIGroups>,
-    selected_group: Option<GroupId>,
-    messages: Vec<OneMessage>,
-    input: String,
-    last_message_count: usize,
-    // Group operation states
-    group_name: String,
-    join_code: String,
-    show_create_group: bool,
-    show_join_group: bool,
-    show_leave_confirm: Option<GroupId>,
-    operation_result: Option<Result<String, String>>,
-}
-
-pub struct Inner {
-    auth: Auth,
-    db: DatabaseConnection,
-    client: Client,
-    url: String,
-    msg_tx: Option<mpsc::Sender<C2S_Msg>>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    GroupsLoaded(Result<UIGroups, String>),
-    SelectGroup(GroupId),
-    MessagesLoaded(Result<Vec<OneMessage>, String>),
-    InputChanged(String),
-    SendMessage,
-    Exit,
-    Redraw((UIGroups, Vec<OneMessage>)),
-    Ready(mpsc::Sender<C2S_Msg>),
-    ServerMsg(S2C_Msg),
-    ScrollToBottom,
-    CreateGroup,
-    JoinGroup,
-    LeaveGroup(GroupId),
-    GroupOperationResult(Result<String, String>),
-    GroupNameChanged(String),
-    JoinCodeChanged(String),
-    ConfirmLeaveGroup(GroupId),
-    CancelLeaveGroup,
 }
 
 impl Clone for UIGroups {

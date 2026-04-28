@@ -1,20 +1,18 @@
 use crate::auth;
 use crate::entity::{account_group, groups};
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use shared::account::AccountId;
 use shared::group::{
     CreateGroup, CreateGroupSuccess, DeleteGroup, DeleteGroupSuccess, ExitGroup, ExitGroupSuccess,
     GetGroup, GetGroupSuccess, GroupId, JoinGroup, JoinGroupSuccess, ListGroups, ListGroupsSuccess,
 };
 use shared::{auth::Auth, group::Group};
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{Json};
 
 // 从 axum 模块导入 AppState
 use crate::axum::AppState;
@@ -25,13 +23,18 @@ pub async fn route_create_group(
     Json(cg): Json<CreateGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
     let db = state.db;
-    if let Err(e) = create_group(&db, cg).await {
-        dbg!(&e);
-        return Err(e);
+    match create_group(&db, cg).await {
+        Ok(gid) => Ok(Json(CreateGroupSuccess { group_id: gid })),
+        Err(e) => {
+            dbg!(&e);
+            Err(e)
+        }
     }
-    Ok(Json(CreateGroupSuccess))
 }
-pub async fn create_group(db: &impl ConnectionTrait, group: CreateGroup) -> Result<(), GroupError> {
+pub async fn create_group(
+    db: &impl ConnectionTrait,
+    group: CreateGroup,
+) -> Result<GroupId, GroupError> {
     let auth = group.auth;
     // 1. 验证 token
     if !auth::auth(db, &auth).await {
@@ -45,8 +48,8 @@ pub async fn create_group(db: &impl ConnectionTrait, group: CreateGroup) -> Resu
     };
 
     // 插入 group（如果 id 已存在会失败）
-    new_group.insert(db).await.map_err(anyhow::Error::from)?;
-    Ok(())
+    let g = new_group.insert(db).await.map_err(anyhow::Error::from)?;
+    Ok(GroupId(g.uuid))
 }
 
 #[axum::debug_handler]
@@ -55,13 +58,18 @@ pub async fn route_join_group(
     Json(jg): Json<JoinGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
     let db = state.db;
-    if let Err(e) = join_group(&db, jg).await {
-        dbg!(&e);
-        return Err(e);
+    match join_group(&db, jg).await {
+        Ok(jgs) => Ok(Json(jgs)),
+        Err(e) => {
+            dbg!(&e);
+            Err(e)
+        }
     }
-    Ok(Json(JoinGroupSuccess))
 }
-pub async fn join_group(db: &impl ConnectionTrait, jg: JoinGroup) -> Result<(), GroupError> {
+pub async fn join_group(
+    db: &impl ConnectionTrait,
+    jg: JoinGroup,
+) -> Result<JoinGroupSuccess, GroupError> {
     let auth = jg.auth;
     let group_id = jg.group_id;
     // 1. 验证 token
@@ -89,7 +97,11 @@ pub async fn join_group(db: &impl ConnectionTrait, jg: JoinGroup) -> Result<(), 
 
     if existing.is_some() {
         // 用户已经在群组中，直接返回成功
-        return Ok(());
+        let ans = JoinGroupSuccess {
+            gid: group_id,
+            uid: AccountId(auth.account_id()),
+        };
+        return Ok(ans);
     }
 
     // 4. 将用户添加到群组
@@ -103,7 +115,12 @@ pub async fn join_group(db: &impl ConnectionTrait, jg: JoinGroup) -> Result<(), 
         .insert(db)
         .await
         .map_err(anyhow::Error::from)?;
-    Ok(())
+
+    let ans = JoinGroupSuccess {
+        gid: group_id,
+        uid: AccountId(auth.account_id()),
+    };
+    Ok(ans)
 }
 #[axum::debug_handler]
 pub async fn route_exit_group(
