@@ -1,4 +1,4 @@
 # 问题杂记
 
-login ui 调小
+切换页面时居中
 voice chat
