@@ -24,6 +24,7 @@ mod chat_util;
 #[derive(Default)]
 pub struct Chat {
     pub inner: Option<Inner>,
+    stream_restart_token: u32,
     groups: Option<UIGroups>,
     selected_group: Option<GroupId>,
     messages: Vec<OneMessage>,
@@ -78,17 +79,20 @@ pub enum Message {
 struct SubData {
     auth: Auth,
     db: DatabaseConnection,
+    restart_token: u32,
 }
 
 impl Hash for SubData {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.auth.account_id().hash(state);
+        self.restart_token.hash(state);
     }
 }
 
 impl PartialEq for SubData {
     fn eq(&self, other: &Self) -> bool {
         self.auth.account_id() == other.auth.account_id()
+            && self.restart_token == other.restart_token
     }
 }
 
@@ -243,6 +247,7 @@ impl Chat {
         };
         let chat = Self {
             inner: Some(inner),
+            stream_restart_token: 0,
             groups: None,
             selected_group: None,
             messages: Vec::new(),
@@ -444,6 +449,7 @@ impl Chat {
                 }
                 CreateGroupResponse::Success(success) => {
                     self.show_create_group = false;
+                    self.stream_restart_token += 1;
                     let Some(inner) = &self.inner else {
                         return Action::None;
                     };
@@ -516,6 +522,7 @@ impl Chat {
                 JoinGroupResponse::Success(success) => {
                     self.show_join_group = false;
                     self.join_code.clear();
+                    self.stream_restart_token += 1;
                     let Some(inner) = &self.inner else {
                         return Action::None;
                     };
@@ -905,6 +912,7 @@ impl Chat {
             SubData {
                 auth: inner.auth.clone(),
                 db: inner.db.clone(),
+                restart_token: self.stream_restart_token,
             },
             textchat_stream,
         )
