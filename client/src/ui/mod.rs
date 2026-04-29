@@ -1,4 +1,5 @@
-use iced::{Element, Subscription, Task, Theme, color};
+use iced::window::{self, Id};
+use iced::{Element, Size, Subscription, Task, Theme, color};
 use sea_orm::Database;
 
 pub mod chat;
@@ -9,6 +10,10 @@ pub fn run() -> iced::Result {
     iced::application(AppState::default, AppState::update, AppState::view)
         .subscription(AppState::subscription)
         .theme(custom_theme)
+        .window(window::Settings {
+            size: Size::new(360.0, 480.0),
+            ..Default::default()
+        })
         .centered()
         .run()
 }
@@ -58,7 +63,9 @@ impl AppState {
                             let (c, task) = chat::Chat::new(auth, db, client, url);
                             //切换页面
                             self.current_screen = Screen::Chat(c);
-                            task.map(Message::Chat)
+                            let resize: Task<Option<Id>> = window::latest()
+                                .then(|id| window::resize(id.unwrap(), Size::new(1000.0, 700.0)));
+                            Task::batch([task.map(Message::Chat), resize.discard()])
                         }
                     }
                 } else {
@@ -77,7 +84,11 @@ impl AppState {
                             l.inner.url = url;
                             self.current_screen = Screen::Login(l);
                             //切换页面
-                            Task::none()
+                            window::latest()
+                                .then(|id| {
+                                    window::resize::<Id>(id.unwrap(), Size::new(360.0, 480.0))
+                                })
+                                .discard()
                         }
                     }
                 } else {
