@@ -67,6 +67,7 @@ pub enum Message {
     JoinCodeChanged(String),
     ConfirmLeaveGroup(GroupId),
     CancelLeaveGroup,
+    ClearOperationResult,
     JoinGroupSubmit,
     JoinGroupResponse(JoinGroupResponse),
     CreateGroupSubmit,
@@ -420,7 +421,10 @@ impl Chat {
                 };
                 if self.group_name.trim().is_empty() {
                     self.operation_result = Some(Err("群组名称不能为空".to_string()));
-                    return Action::None;
+                    return Action::Run(Task::perform(
+                        async { tokio::time::sleep(std::time::Duration::from_secs(3)).await },
+                        |_| Message::ClearOperationResult,
+                    ));
                 }
                 let auth = inner.auth.clone();
                 let client = inner.client.clone();
@@ -492,7 +496,10 @@ impl Chat {
                 };
                 let Ok(gid) = self.join_code.trim().parse::<uuid::Uuid>() else {
                     self.operation_result = Some(Err("无效的群组ID".to_string()));
-                    return Action::None;
+                    return Action::Run(Task::perform(
+                        async { tokio::time::sleep(std::time::Duration::from_secs(3)).await },
+                        |_| Message::ClearOperationResult,
+                    ));
                 };
                 let auth = inner.auth.clone();
                 let client = inner.client.clone();
@@ -601,10 +608,20 @@ impl Chat {
                 };
                 let auth = inner.auth.clone();
                 let db = inner.db.clone();
-                Action::Run(Task::perform(
-                    async move { get_groups_info(auth, db).await },
-                    Message::GroupsLoaded,
-                ))
+                Action::Run(Task::batch([
+                    Task::perform(
+                        async move { get_groups_info(auth, db).await },
+                        Message::GroupsLoaded,
+                    ),
+                    Task::perform(
+                        async { tokio::time::sleep(std::time::Duration::from_secs(3)).await },
+                        |_| Message::ClearOperationResult,
+                    ),
+                ]))
+            }
+            Message::ClearOperationResult => {
+                self.operation_result = None;
+                Action::None
             }
         }
     }

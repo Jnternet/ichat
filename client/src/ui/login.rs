@@ -1,5 +1,6 @@
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Task};
+use std::time::Duration;
 use reqwest::Client;
 use sha2::Digest;
 use shared::auth::Auth;
@@ -39,6 +40,7 @@ pub enum Message {
     SubmitRegister,
     LoginResponse(LoginResponse),
     RegisterResponse(RegisterResponse),
+    ClearError,
 }
 pub enum Action {
     None,
@@ -48,6 +50,13 @@ pub enum Action {
         client: Client,
         url: String,
     },
+}
+
+fn error_timer() -> Task<Message> {
+    Task::perform(
+        async { tokio::time::sleep(Duration::from_secs(3)).await },
+        |_| Message::ClearError,
+    )
 }
 
 impl Login {
@@ -80,7 +89,7 @@ impl Login {
             Message::SubmitLogin => {
                 if self.account.is_empty() || self.password.is_empty() {
                     self.error = Some("账号和密码不能为空".to_string());
-                    return Action::None;
+                    return Action::Run(error_timer());
                 }
 
                 println!("正在尝试登录: {}", self.account);
@@ -100,12 +109,12 @@ impl Login {
             Message::SubmitRegister => {
                 if self.account.is_empty() || self.username.is_empty() || self.password.is_empty() {
                     self.error = Some("账号、用户名和密码不能为空".to_string());
-                    return Action::None;
+                    return Action::Run(error_timer());
                 }
 
                 if self.password != self.confirm_password {
                     self.error = Some("两次输入的密码不一致".to_string());
-                    return Action::None;
+                    return Action::Run(error_timer());
                 }
 
                 println!("正在尝试注册: {}, 用户名: {}", self.account, self.username);
@@ -137,6 +146,7 @@ impl Login {
                 LoginResponse::Fail(e) => {
                     println!("login failed: {:?}", e);
                     self.error = Some(format!("登录失败: {:?}", e));
+                    return Action::Run(error_timer());
                 }
             },
             Message::RegisterResponse(r) => {
@@ -150,12 +160,17 @@ impl Login {
                         self.password.clear();
                         self.confirm_password.clear();
                         self.error = Some("注册成功，请登录".to_string());
+                        return Action::Run(error_timer());
                     }
                     RegisterResponse::Fail(e) => {
                         println!("register failed: {:?}", e);
                         self.error = Some(format!("注册失败: {:?}", e));
+                        return Action::Run(error_timer());
                     }
                 }
+            }
+            Message::ClearError => {
+                self.error = None;
             }
         }
         Action::None
