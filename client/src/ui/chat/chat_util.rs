@@ -155,6 +155,20 @@ pub(super) async fn save_join_group_to_db(
     Ok(())
 }
 
+pub(super) async fn remove_group_from_db(
+    db: &DatabaseConnection,
+    uid: uuid::Uuid,
+    gid: uuid::Uuid,
+) -> Result<(), String> {
+    account_group::Entity::delete_many()
+        .filter(account_group::Column::AccountUuid.eq(uid))
+        .filter(account_group::Column::GroupUuid.eq(gid))
+        .exec(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub(super) async fn get_group_messages(
     auth: Auth,
     db: DatabaseConnection,
