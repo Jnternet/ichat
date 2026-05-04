@@ -143,7 +143,7 @@ pub async fn handle_client(
     let auth = vga.auth;
     let gid = vga.gid;
 
-    if crate::auth::auth(&db, &auth).await {
+    if !crate::auth::auth(&db, &auth).await {
         bail!("no auth to voice_chat")
     }
 
