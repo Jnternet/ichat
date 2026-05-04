@@ -100,7 +100,9 @@ async fn handle_read(mut rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<(
 
     let mut buf = bytes::BytesMut::with_capacity(8192);
     loop {
-        rh.read_buf(&mut buf).await?;
+        let u = rh.read_u64().await?;
+        buf.resize(u as usize, 0);
+        rh.read_exact(&mut buf).await?;
         let msg = serde_json::from_slice::<S2C_VC_Msg>(&buf)?;
         buf.clear();
         let vd = msg.voice_data;
@@ -170,7 +172,11 @@ async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result
         let b = bytes::Bytes::copy_from_slice(s);
         let c2s = C2S_VC_Msg { voice_data: b };
 
-        wh.write_all(&serde_json::to_vec(&c2s)?).await?;
+        let json = serde_json::to_vec(&c2s)?;
+        let len = json.len() as u64;
+        wh.write_u64(len).await?;
+        wh.flush().await?;
+        wh.write_all(&json).await?;
         wh.flush().await?;
     }
 }

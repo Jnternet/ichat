@@ -175,8 +175,9 @@ async fn handle_rh(
     eprintln!("进入handle_rh");
     let mut buf = bytes::BytesMut::with_capacity(8192);
     loop {
-        read_half.read_buf(&mut buf).await?;
-        dbg!(&buf);
+        let u = read_half.read_u64().await? as usize;
+        buf.resize(u as usize, 0);
+        read_half.read_exact(&mut buf).await?;
         let msg = serde_json::from_slice::<C2S_VC_Msg>(&buf).context("not C2S_VC_Msg recived")?;
         buf.clear();
         let s2c = S2C_VC_Msg {
@@ -199,9 +200,11 @@ async fn handle_wh(
 ) -> anyhow::Result<()> {
     eprintln!("进入handle_wh");
     while let Some(m) = sa.next().await {
-        write_half
-            .write_all(serde_json::to_vec(&m)?.as_slice())
-            .await?;
+        let json = serde_json::to_vec(&m)?;
+        let len = json.len() as u64;
+        write_half.write_u64(len).await?;
+        write_half.flush().await?;
+        write_half.write_all(&json).await?;
         write_half.flush().await?;
     }
     Ok(())
