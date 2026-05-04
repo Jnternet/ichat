@@ -1,7 +1,10 @@
 use crate::tools;
 use crate::tools::textchat::{get_connector, get_tls_stream};
 use crate::tools::update_info::save_msg;
-use chat_util::{OneMessage, UIGroups, get_group_messages, get_groups_info, remove_group_from_db, save_join_group_to_db};
+use chat_util::{
+    OneMessage, UIGroups, get_group_messages, get_groups_info, remove_group_from_db,
+    save_join_group_to_db,
+};
 use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
@@ -10,7 +13,10 @@ use reqwest::Client;
 use sea_orm::DatabaseConnection;
 use shared::auth::Auth;
 use shared::chrono;
-use shared::group::{CreateGroup, CreateGroupResponse, ExitGroup, ExitGroupResponse, GroupId, JoinGroup, JoinGroupResponse};
+use shared::group::{
+    CreateGroup, CreateGroupResponse, ExitGroup, ExitGroupResponse, GroupId, JoinGroup,
+    JoinGroupResponse,
+};
 use shared::message::{C2S_Msg, Msg, S2C_Msg};
 use shared::serde_json;
 use std::hash::{Hash, Hasher};
@@ -577,13 +583,17 @@ impl Chat {
                         let resp = crate::tools::group::exit_group(
                             &client,
                             &url,
-                            &ExitGroup { auth: auth.clone(), group_id },
+                            &ExitGroup {
+                                auth: auth.clone(),
+                                group_id,
+                            },
                         )
                         .await
                         .unwrap_or(ExitGroupResponse::Fail(shared::group::GroupError::UnKnown));
                         match resp {
                             ExitGroupResponse::Success(_) => {
-                                let _ = remove_group_from_db(&db, auth.account_id(), group_id.0).await;
+                                let _ =
+                                    remove_group_from_db(&db, auth.account_id(), group_id.0).await;
                                 Ok("退出群组成功".to_string())
                             }
                             ExitGroupResponse::Fail(e) => Err(format!("退出失败: {}", e)),

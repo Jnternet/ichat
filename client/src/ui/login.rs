@@ -1,11 +1,11 @@
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Task};
-use std::time::Duration;
 use reqwest::Client;
 use sha2::Digest;
 use shared::auth::Auth;
 use shared::login::{Login as SharedLogin, LoginResponse};
 use shared::register::{Register, RegisterResponse};
+use std::time::Duration;
 
 pub struct Login {
     pub inner: Inner,
