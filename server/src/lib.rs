@@ -7,3 +7,4 @@ pub mod message;
 pub mod register;
 pub mod textchat;
 pub mod update_info;
+pub mod voice_chat;
