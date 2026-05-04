@@ -153,7 +153,7 @@ pub async fn handle_client(
 
     eprintln!("准备启动rh与wh");
     tokio::select! {
-        r = handle_rh(rh,online_groups.clone(),AccountId(auth.account_id())) => {
+        r = handle_rh(rh,online_groups.clone(),AccountId(auth.account_id()),gid) => {
             dbg!(&r);
         },
         r = handle_wh(wh,sa) => {
@@ -170,12 +170,14 @@ async fn handle_rh(
     mut read_half: ReadHalf<TlsStream<tokio::net::TcpStream>>,
     online_groups: OnlineGroups<S2C_VC_Msg>,
     sender_id: AccountId,
+    gid: GroupId,
 ) -> anyhow::Result<()> {
     eprintln!("进入handle_rh");
     let mut buf = bytes::BytesMut::with_capacity(8192);
     loop {
         read_half.read_buf(&mut buf).await?;
-        let msg = serde_json::from_slice::<C2S_VC_Msg>(&buf)?;
+        dbg!(&buf);
+        let msg = serde_json::from_slice::<C2S_VC_Msg>(&buf).context("not C2S_VC_Msg recived")?;
         buf.clear();
         let s2c = S2C_VC_Msg {
             sender_id,
@@ -185,7 +187,7 @@ async fn handle_rh(
         //缩短持有锁的时间
         let gs = {
             let mg = online_groups.0.lock().await;
-            mg.get(&msg.target).context("没有创建在线群组")?.clone()
+            mg.get(&gid).context("没有创建在线群组")?.clone()
         };
         gs.sender.broadcast_direct(s2c).await?;
     }

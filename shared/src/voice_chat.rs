@@ -6,7 +6,6 @@ use crate::{account::AccountId, auth::Auth, group::GroupId};
 #[allow(non_camel_case_types)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct C2S_VC_Msg {
-    pub target: GroupId,
     pub voice_data: Bytes,
 }
 

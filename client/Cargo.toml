@@ -21,3 +21,6 @@ sha2 = "0.11.0"
 hex = "0.4.3"
 uuid = { version = "1.23.0", features = ["v4"] }
 iced = { version = "0.14.0", features = ["tokio"] }
+ringbuf = "0.5.0"
+cpal = "0.17.3"
+bytemuck = "1.25.0"
