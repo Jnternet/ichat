@@ -26,7 +26,7 @@ pub async fn run() -> anyhow::Result<()> {
     let server_db_url = std::env::var("SERVER_DATABASE")?;
     let db = Database::connect(server_db_url).await?;
 
-    let server_addr = std::env::var("SERVER_TEXTCHAT_ADDR")?;
+    let server_addr = std::env::var("SERVER_VOICE_CHAT_ADDR")?;
     let listener = TcpListener::bind(server_addr).await?;
 
     let tls_acceptor = get_acceptor().await?;
