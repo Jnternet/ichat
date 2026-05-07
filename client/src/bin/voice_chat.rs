@@ -1,17 +1,16 @@
-use ringbuf::{
-    HeapCons, HeapProd, HeapRb,
-    traits::{Consumer, Producer, Split},
-};
+use anyhow::Context;
+use bytes::BytesMut;
+use ringbuf::traits::{Consumer, Producer, Split};
 
-use cpal::{
-    Stream,
-    traits::{DeviceTrait, HostTrait, StreamTrait},
-};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rkyv::rancor;
 use rustls::crypto::aws_lc_rs;
 use sha2::Digest;
-use shared::voice_chat::{C2S_VC_Msg, S2C_VC_Msg, VoiceGroupAuth};
-use shared::*;
+use shared::{
+    tcp_helper::ReadHelper,
+    voice_chat::{C2S_VC_Msg, S2C_VC_Msg, VoiceGroupAuth},
+};
+use shared::{voice_chat::ArchivedS2C_VC_Msg, *};
 use std::io::stdin;
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
@@ -56,8 +55,8 @@ async fn main() -> anyhow::Result<()> {
 
     let vga = VoiceGroupAuth { auth, gid };
     // 4. 发送 Auth 信息进行认证
-    let auth_json = rkyv::to_bytes::<rancor::Error>(&vga)?;
-    tls_stream.write_all(&auth_json).await?;
+    let b = rkyv::to_bytes::<rancor::Error>(&vga)?;
+    tls_stream.write_all(&b).await?;
     tls_stream.flush().await?;
 
     // 5. 分离读写流，分别处理消息的发送和接收
@@ -76,15 +75,80 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_read(mut rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
+async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
+    let mut rh = ReadHelper::new(rh);
+    let rb = ringbuf::HeapRb::<f32>::new(4096);
+    let (mut rp, mut rc) = rb.split();
+
     let host = cpal::default_host();
     let output = host.default_output_device().unwrap();
-    let config = output.default_output_config().unwrap().config();
 
-    todo!()
+    let config = output.default_output_config().unwrap().config();
+    let stream = output
+        .build_output_stream(
+            &config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let mut rem = data;
+                while !rem.is_empty() {
+                    let n = rc.pop_slice(rem);
+                    rem = &mut rem[n..]
+                }
+            },
+            move |err| {
+                dbg!(&err);
+            },
+            None,
+        )
+        .unwrap();
+
+    stream.play().unwrap();
+
+    let mut buf = BytesMut::zeroed(4096);
+    while let Some(u) = rh.next_item(&mut buf).await {
+        let ar = rkyv::access::<ArchivedS2C_VC_Msg, rancor::Error>(&buf[..u])
+            .context("cannot parse S2C_VC_Msg")
+            .unwrap();
+        let s2c = rkyv::deserialize::<S2C_VC_Msg, rancor::Error>(ar)
+            .context("cannot deserialize")
+            .unwrap();
+        rp.push_slice(&s2c.voice_data);
+    }
+
+    Ok(())
 }
 async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
-    todo!()
+    let (s, r) = std::sync::mpsc::channel();
+
+    let host = cpal::default_host();
+    let input = host.default_input_device().unwrap();
+    let config = input.default_input_config().unwrap().config();
+
+    let stream = input
+        .build_input_stream(
+            &config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                let c2s = C2S_VC_Msg {
+                    voice_data: data.to_vec(),
+                };
+                s.send(c2s).context("channel err").unwrap();
+            },
+            move |err| {
+                dbg!(&err);
+            },
+            None,
+        )
+        .unwrap();
+
+    stream.play().unwrap();
+
+    while let Ok(c2s) = r.recv() {
+        let b = rkyv::to_bytes::<rancor::Error>(&c2s).context("cannot serde to bytes")?;
+        wh.write_u64(b.len() as u64).await?;
+        wh.write_all(&b).await?;
+        wh.flush().await?;
+    }
+
+    Ok(())
 }
 
 // 登录函数，返回 Auth 信息
