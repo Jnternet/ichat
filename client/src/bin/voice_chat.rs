@@ -76,15 +76,23 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn get_audio_config() -> cpal::StreamConfig {
+    cpal::StreamConfig {
+        channels: 2,
+        sample_rate: 48000,
+        buffer_size: cpal::BufferSize::Default,
+    }
+}
+
 async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
     let mut rh = ReadHelper::new(rh);
-    let rb = ringbuf::HeapRb::<f32>::new(4096);
+    let rb = ringbuf::HeapRb::<f32>::new(32768);
     let (mut rp, mut rc) = rb.split();
 
     let host = cpal::default_host();
     let output = host.default_output_device().unwrap();
 
-    let config = output.default_output_config().unwrap().config();
+    let config = get_audio_config();
     let stream = output
         .build_output_stream(
             &config,
@@ -104,7 +112,7 @@ async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
 
     stream.play().unwrap();
 
-    let mut buf = BytesMut::zeroed(4096);
+    let mut buf = BytesMut::zeroed(32768);
     while let Some(u) = rh.next_item(&mut buf).await {
         let ar = rkyv::access::<ArchivedS2C_VC_Msg, rancor::Error>(&buf[..u])
             .context("cannot parse S2C_VC_Msg")
@@ -112,17 +120,17 @@ async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
         let s2c = rkyv::deserialize::<S2C_VC_Msg, rancor::Error>(ar)
             .context("cannot deserialize")
             .unwrap();
-        rp.push_slice(&s2c.voice_data);
+        let _ = rp.push_slice(&s2c.voice_data);
     }
 
     Ok(())
 }
 async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
-    let (s, mut r) = tokio::sync::mpsc::channel(1000);
+    let (s, mut r) = tokio::sync::mpsc::channel(10000);
 
     let host = cpal::default_host();
     let input = host.default_input_device().unwrap();
-    let config = input.default_input_config().unwrap().config();
+    let config = get_audio_config();
 
     let stream = input
         .build_input_stream(
@@ -131,7 +139,7 @@ async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result
                 let c2s = C2S_VC_Msg {
                     voice_data: data.to_vec(),
                 };
-                s.try_send(c2s).context("channel err").unwrap();
+                let _ = s.try_send(c2s);
             },
             move |err| {
                 dbg!(&err);

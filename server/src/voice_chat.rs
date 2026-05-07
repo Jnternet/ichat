@@ -79,7 +79,7 @@ async fn handle_client(
     let (s, r) = {
         let mut g = online_groups.hm.write().expect("read lock poisoned");
         let vg = g.entry(gid).or_insert_with(|| {
-            let (s, r) = broadcast::channel(100);
+            let (s, r) = broadcast::channel(1000);
             VoiceGroup { sender: s, _r: r }
         });
         (vg.sender.clone(), vg.sender.subscribe())
@@ -102,7 +102,7 @@ async fn handle_rh(
     s: broadcast::Sender<S2C_VC_Msg>,
     sender_id: Uuid,
 ) -> anyhow::Result<()> {
-    let mut buf = BytesMut::zeroed(4096);
+    let mut buf = BytesMut::zeroed(32768);
     while let Some(u) = rh.next_item(&mut buf).await {
         let ar = rkyv::access::<ArchivedC2S_VC_Msg, rancor::Error>(&buf[..u])?;
         let c2s = rkyv::deserialize::<C2S_VC_Msg, rancor::Error>(ar)?;
@@ -110,7 +110,7 @@ async fn handle_rh(
             sender_id,
             voice_data: c2s.voice_data,
         };
-        s.send(s2c)?;
+        let _ = s.send(s2c);
     }
     bail!("no more vc msg")
 }
