@@ -97,11 +97,9 @@ async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
         .build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let mut rem = data;
-                while !rem.is_empty() {
-                    let n = rc.pop_slice(rem);
-                    rem = &mut rem[n..]
-                }
+                data.iter_mut().zip(rc.pop_iter()).for_each(|(d, s)| {
+                    *d = (s * 2.0).tanh();
+                });
             },
             move |err| {
                 dbg!(&err);
