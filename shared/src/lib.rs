@@ -9,5 +9,6 @@ pub mod group;
 pub mod login;
 pub mod message;
 pub mod register;
+pub mod tcp_helper;
 pub mod update_info;
 pub mod voice_chat;

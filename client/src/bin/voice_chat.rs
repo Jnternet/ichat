@@ -1,3 +1,12 @@
+use ringbuf::{
+    HeapCons, HeapProd, HeapRb,
+    traits::{Consumer, Producer, Split},
+};
+
+use cpal::{
+    Stream,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+};
 use rkyv::rancor;
 use rustls::crypto::aws_lc_rs;
 use sha2::Digest;
@@ -68,6 +77,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn handle_read(mut rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
+    let host = cpal::default_host();
+    let output = host.default_output_device().unwrap();
+    let config = output.default_output_config().unwrap().config();
+
     todo!()
 }
 async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {

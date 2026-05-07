@@ -6,18 +6,17 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sea_orm::{Database, DatabaseConnection};
 use shared::group::GroupId;
 use shared::rkyv;
+use shared::tcp_helper::ReadHelper;
 use shared::voice_chat::{
     ArchivedC2S_VC_Msg, ArchivedVoiceGroupAuth, C2S_VC_Msg, S2C_VC_Msg, VoiceGroupAuth,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
+use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use uuid::Uuid;
-
-const MAX_BUF_SIZE: usize = 100_000;
 
 pub async fn run() -> anyhow::Result<()> {
     //准备数据库
@@ -129,39 +128,6 @@ async fn handle_wh(
     bail!("cannot send to client")
 }
 
-pub struct ReadHelper<T>
-where
-    T: AsyncReadExt,
-{
-    rh: T,
-}
-impl<T> ReadHelper<T>
-where
-    T: AsyncReadExt + Unpin,
-{
-    pub fn new(rh: T) -> Self {
-        Self { rh }
-    }
-    pub async fn next_item(&mut self, buf: &mut BytesMut) -> Option<usize> {
-        let Ok(u) = self.rh.read_u64().await else {
-            return None;
-        };
-        let u = u as usize;
-
-        if u > MAX_BUF_SIZE {
-            return None;
-        }
-        //使用len: 必须是已经初始化过的长度
-        if u > buf.len() {
-            buf.resize(u, 0);
-        }
-        let Ok(ans) = self.rh.read_exact(&mut buf[..u]).await else {
-            return None;
-        };
-
-        Some(ans)
-    }
-}
 pub async fn get_acceptor() -> anyhow::Result<TlsAcceptor> {
     let cert_path = std::env::var("CERT_PATH")?;
     let key_path = std::env::var("KEY_PATH")?;
