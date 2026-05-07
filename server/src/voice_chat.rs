@@ -4,13 +4,14 @@ use rkyv::rancor;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sea_orm::{Database, DatabaseConnection};
-use shared::auth::ArchivedAuth;
 use shared::group::GroupId;
 use shared::rkyv;
-use shared::voice_chat::{ArchivedVoiceGroupAuth, S2C_VC_Msg, VoiceGroupAuth};
+use shared::voice_chat::{
+    ArchivedC2S_VC_Msg, ArchivedVoiceGroupAuth, C2S_VC_Msg, S2C_VC_Msg, VoiceGroupAuth,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tokio::io::{AsyncReadExt, ReadHalf, WriteHalf};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio_rustls::{TlsAcceptor, TlsStream};
@@ -48,7 +49,6 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 struct VoiceGroup {
-    gid: GroupId,
     sender: broadcast::Sender<S2C_VC_Msg>,
     _r: broadcast::Receiver<S2C_VC_Msg>,
 }
@@ -81,33 +81,52 @@ async fn handle_client(
         let mut g = online_groups.hm.write().expect("read lock poisoned");
         let vg = g.entry(gid).or_insert_with(|| {
             let (s, r) = broadcast::channel(100);
-            VoiceGroup {
-                gid,
-                sender: s,
-                _r: r,
-            }
+            VoiceGroup { sender: s, _r: r }
         });
         (vg.sender.clone(), vg.sender.subscribe())
     };
 
-    todo!()
+    tokio::select! {
+        r = handle_rh(helper, s, auth.account_id()) => {
+                dbg!(&r);
+            }
+        r = handle_wh(wh,r) => {
+                dbg!(&r);
+            }
+    };
+    println!("handle_client exit");
+    Ok(())
 }
 
 async fn handle_rh(
-    rh: ReadHelper<ReadHalf<TlsStream<TcpStream>>>,
+    mut rh: ReadHelper<ReadHalf<TlsStream<TcpStream>>>,
     s: broadcast::Sender<S2C_VC_Msg>,
     sender_id: Uuid,
 ) -> anyhow::Result<()> {
     let mut buf = BytesMut::zeroed(4096);
-
-    todo!()
+    while let Some(u) = rh.next_item(&mut buf).await {
+        let ar = rkyv::access::<ArchivedC2S_VC_Msg, rancor::Error>(&buf[..u])?;
+        let c2s = rkyv::deserialize::<C2S_VC_Msg, rancor::Error>(ar)?;
+        let s2c = S2C_VC_Msg {
+            sender_id,
+            voice_data: c2s.voice_data,
+        };
+        s.send(s2c)?;
+    }
+    bail!("no more vc msg")
 }
 
 async fn handle_wh(
-    wh: WriteHalf<TlsStream<TcpStream>>,
-    r: broadcast::Receiver<S2C_VC_Msg>,
+    mut wh: WriteHalf<TlsStream<TcpStream>>,
+    mut r: broadcast::Receiver<S2C_VC_Msg>,
 ) -> anyhow::Result<()> {
-    todo!();
+    while let Ok(s2c) = r.recv().await {
+        let b = rkyv::to_bytes::<rancor::Error>(&s2c)?;
+        wh.write_u64(b.len() as u64).await?;
+        wh.write_all(&b).await?;
+        wh.flush().await?
+    }
+    bail!("cannot send to client")
 }
 
 pub struct ReadHelper<T>
