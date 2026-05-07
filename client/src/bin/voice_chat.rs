@@ -1,15 +1,11 @@
-use anyhow::Context;
-use cpal::SampleFormat;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::traits::{Consumer, Observer, Producer, Split};
+use rkyv::rancor;
 use rustls::crypto::aws_lc_rs;
 use sha2::Digest;
-use shared::group::GroupId;
 use shared::voice_chat::{C2S_VC_Msg, S2C_VC_Msg, VoiceGroupAuth};
 use shared::*;
 use std::io::stdin;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
+use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, TlsStream};
 use uuid::Uuid;
@@ -42,7 +38,6 @@ async fn main() -> anyhow::Result<()> {
     stdin().read_line(&mut gid)?;
     gid = gid.trim().to_string();
     let gid = gid.parse::<Uuid>()?;
-    let gid = GroupId(gid);
 
     // 3. 建立与服务端的 TLS 连接
     let server_addr = std::env::var("SERVER_VOICE_CHAT_ADDR")?;
@@ -52,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
 
     let vga = VoiceGroupAuth { auth, gid };
     // 4. 发送 Auth 信息进行认证
-    let auth_json = serde_json::to_vec(&vga)?;
+    let auth_json = rkyv::to_bytes::<rancor::Error>(&vga)?;
     tls_stream.write_all(&auth_json).await?;
     tls_stream.flush().await?;
 
@@ -73,112 +68,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn handle_read(mut rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
-    let rb = ringbuf::HeapRb::<f32>::new(8192);
-    let (mut rp, mut rc) = rb.split();
-
-    let host = cpal::default_host();
-    let output = host.default_output_device().expect("no output device");
-    let supported_stream_config = output.default_output_config()?;
-    let config = supported_stream_config.config();
-
-    let stream = output.build_output_stream(
-        &config,
-        move |data: &mut [f32], _x| {
-            data.iter_mut()
-                .zip(rc.pop_iter())
-                .for_each(|(data, sample)| {
-                    *data = sample;
-                });
-        },
-        move |error| {
-            dbg!(error);
-        },
-        None,
-    )?;
-
-    stream.play()?;
-
-    let mut buf = bytes::BytesMut::with_capacity(8192);
-    loop {
-        let u = rh.read_u64().await?;
-        buf.resize(u as usize, 0);
-        rh.read_exact(&mut buf).await?;
-        let msg = serde_json::from_slice::<S2C_VC_Msg>(&buf)?;
-        buf.clear();
-        let vd = msg.voice_data;
-        let s = u8_to_f32_slice(&vd).unwrap();
-        rp.push_slice(s);
-    }
+    todo!()
 }
-fn u8_to_f32_slice(slice: &[u8]) -> Option<&[f32]> {
-    bytemuck::try_cast_slice(slice).ok()
-}
-fn f32_to_u8_slice(slice: &[f32]) -> &[u8] {
-    bytemuck::cast_slice(slice)
-}
-
 async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
-    let rb = ringbuf::HeapRb::<f32>::new(40960);
-    let (mut rp, mut rc) = rb.split();
-
-    let host = cpal::default_host();
-
-    let input = host.default_input_device().context("未找到默认输入设备")?;
-    println!(
-        "使用输入设备: {}",
-        input.description().context("无法获取设备描述")?
-    );
-
-    let s_config = input.default_input_config()?;
-    let config = s_config.config();
-
-    println!("\n选择的录音配置:");
-    println!("  - 声道数: {}", config.channels);
-    println!("  - 采样率: {}", config.sample_rate);
-    println!("  - 采样格式: {:?}", s_config.sample_format());
-    println!("  - 缓冲区大小: {:?}", config.buffer_size);
-
-    // 根据采样格式创建录音回调，确保数据格式与WAV文件头一致
-    let stream = match s_config.sample_format() {
-        // 浮点格式转换为16位整数
-        SampleFormat::F32 => input.build_input_stream(
-            &config,
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                //用于调整音量(默认1.5倍音量)
-                // let data: Vec<f32> = data.iter().map(|f| (f * 1.5).clamp(-1.0, 1.0)).collect();
-                rp.push_slice(data);
-            },
-            move |err| {
-                eprintln!("录音错误: {:?}", err);
-            },
-            None,
-        )?,
-        _ => {
-            anyhow::bail!("不支持的采样格式: {:?}", s_config.sample_format());
-        }
-    };
-
-    // 启动录音(新线程
-    stream.play()?;
-    println!("开始录音...");
-
-    let mut buf = [0f32; 8192];
-    loop {
-        if rc.occupied_len() == 0 {
-            continue;
-        }
-        let u = rc.pop_slice(&mut buf);
-        let s = f32_to_u8_slice(&buf[..u]);
-        let b = bytes::Bytes::copy_from_slice(s);
-        let c2s = C2S_VC_Msg { voice_data: b };
-
-        let json = serde_json::to_vec(&c2s)?;
-        let len = json.len() as u64;
-        wh.write_u64(len).await?;
-        wh.flush().await?;
-        wh.write_all(&json).await?;
-        wh.flush().await?;
-    }
+    todo!()
 }
 
 // 登录函数，返回 Auth 信息

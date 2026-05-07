@@ -1,23 +1,23 @@
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::{account::AccountId, auth::Auth, group::GroupId};
+use crate::auth::Auth;
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Archive, Serialize, Deserialize, Clone)]
 pub struct C2S_VC_Msg {
-    pub voice_data: Bytes,
+    pub voice_data: Vec<f32>,
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Archive, Serialize, Deserialize, Clone)]
 pub struct S2C_VC_Msg {
-    pub sender_id: AccountId,
-    pub voice_data: Bytes,
+    pub sender_id: Uuid,
+    pub voice_data: Vec<f32>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Archive, Serialize, Deserialize, Clone)]
 pub struct VoiceGroupAuth {
     pub auth: Auth,
-    pub gid: GroupId,
+    pub gid: Uuid,
 }

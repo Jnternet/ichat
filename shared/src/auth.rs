@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(
+    Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Serialize, Deserialize, Clone,
+)]
 pub struct Auth {
     account_id: Uuid,
     token: String,
