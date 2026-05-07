@@ -118,7 +118,7 @@ async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
     Ok(())
 }
 async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
-    let (s, r) = std::sync::mpsc::channel();
+    let (s, mut r) = tokio::sync::mpsc::channel(1000);
 
     let host = cpal::default_host();
     let input = host.default_input_device().unwrap();
@@ -131,7 +131,7 @@ async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result
                 let c2s = C2S_VC_Msg {
                     voice_data: data.to_vec(),
                 };
-                s.send(c2s).context("channel err").unwrap();
+                s.try_send(c2s).context("channel err").unwrap();
             },
             move |err| {
                 dbg!(&err);
@@ -142,7 +142,7 @@ async fn handle_write(mut wh: WriteHalf<TlsStream<TcpStream>>) -> anyhow::Result
 
     stream.play().unwrap();
 
-    while let Ok(c2s) = r.recv() {
+    while let Some(c2s) = r.recv().await {
         let b = rkyv::to_bytes::<rancor::Error>(&c2s).context("cannot serde to bytes")?;
         wh.write_u64(b.len() as u64).await?;
         wh.write_all(&b).await?;
