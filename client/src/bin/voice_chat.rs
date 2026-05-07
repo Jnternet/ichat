@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
     let vga = VoiceGroupAuth { auth, gid };
     // 4. 发送 Auth 信息进行认证
     let b = rkyv::to_bytes::<rancor::Error>(&vga)?;
+    tls_stream.write_u64(b.len() as u64).await?;
     tls_stream.write_all(&b).await?;
     tls_stream.flush().await?;
 
