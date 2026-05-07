@@ -1,15 +1,20 @@
+use anyhow::{Context, bail};
 use bytes::BytesMut;
+use rkyv::rancor;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sea_orm::{Database, DatabaseConnection};
+use shared::auth::ArchivedAuth;
 use shared::group::GroupId;
-use shared::voice_chat::S2C_VC_Msg;
+use shared::rkyv;
+use shared::voice_chat::{ArchivedVoiceGroupAuth, S2C_VC_Msg, VoiceGroupAuth};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio_rustls::{TlsAcceptor, TlsStream};
+use uuid::Uuid;
 
 const MAX_BUF_SIZE: usize = 100_000;
 
@@ -58,7 +63,51 @@ async fn handle_client(
     tls_stream: TlsStream<TcpStream>,
     online_groups: OnlineGroups,
 ) -> anyhow::Result<()> {
+    let (rh, wh) = tokio::io::split(tls_stream);
+    let mut helper = ReadHelper::new(rh);
+    let mut buf = BytesMut::zeroed(4096);
+    let n = helper.next_item(&mut buf).await.context("no auth given")?;
+    let vga = rkyv::access::<ArchivedVoiceGroupAuth, rancor::Error>(&buf[..n])
+        .context("cannot access auth")?;
+    let vga = rkyv::deserialize::<VoiceGroupAuth, rancor::Error>(vga)?;
+    let auth = vga.auth;
+    let gid = vga.gid;
+    let gid = GroupId(gid);
+    if !crate::auth::auth(&db, &auth).await {
+        bail!("no auth to chat")
+    }
+
+    let (s, r) = {
+        let mut g = online_groups.hm.write().expect("read lock poisoned");
+        let vg = g.entry(gid).or_insert_with(|| {
+            let (s, r) = broadcast::channel(100);
+            VoiceGroup {
+                gid,
+                sender: s,
+                _r: r,
+            }
+        });
+        (vg.sender.clone(), vg.sender.subscribe())
+    };
+
     todo!()
+}
+
+async fn handle_rh(
+    rh: ReadHelper<ReadHalf<TlsStream<TcpStream>>>,
+    s: broadcast::Sender<S2C_VC_Msg>,
+    sender_id: Uuid,
+) -> anyhow::Result<()> {
+    let mut buf = BytesMut::zeroed(4096);
+
+    todo!()
+}
+
+async fn handle_wh(
+    wh: WriteHalf<TlsStream<TcpStream>>,
+    r: broadcast::Receiver<S2C_VC_Msg>,
+) -> anyhow::Result<()> {
+    todo!();
 }
 
 pub struct ReadHelper<T>
