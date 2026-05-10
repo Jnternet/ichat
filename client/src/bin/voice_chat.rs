@@ -150,7 +150,7 @@ impl HVS {
         let (s, r) = channel(4096);
 
         self.sender.try_send(r)?;
-        self.hm.insert(id, s.clone()).context("重复插入")?;
+        self.hm.insert(id, s.clone());
         Ok(s)
     }
     fn send(&mut self, msg: S2C_VC_Msg) -> anyhow::Result<()> {
