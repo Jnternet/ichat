@@ -1,6 +1,5 @@
 use anyhow::Context;
 use bytes::BytesMut;
-use ringbuf::traits::{Consumer, Producer, Split};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rkyv::rancor;
@@ -94,39 +93,6 @@ struct HV {
 }
 
 impl HV {
-    fn add(&mut self, id: Uuid) -> anyhow::Result<Sender<Vec<f32>>> {
-        let (s, r) = channel(4096);
-
-        self.sender_hm.insert(id, s.clone()).context("重复插入")?;
-        self.rec_v.push(r);
-
-        Ok(s)
-    }
-
-    fn send_vd(&mut self, msg: S2C_VC_Msg) -> anyhow::Result<()> {
-        let id = msg.sender_id;
-        let vd = msg.voice_data;
-
-        let o = self.sender_hm.get(&id);
-        let s = match o {
-            Some(s) => s.clone(),
-            None => self.add(id).unwrap(),
-        };
-        s.try_send(vd)?;
-
-        Ok(())
-    }
-    async fn one_sound(&mut self) -> Vec<Vec<f32>> {
-        let mut ans = Vec::new();
-
-        for r in &mut self.rec_v {
-            let Some(vd) = r.recv().await else {
-                continue;
-            };
-            ans.push(vd);
-        }
-        ans
-    }
     fn split(self) -> (HVS, HVR) {
         let (s, r) = channel(100);
         let hvs = HVS {
@@ -141,6 +107,7 @@ impl HV {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 struct HVS {
     sender: Sender<Receiver<Vec<f32>>>,
     hm: HashMap<Uuid, Sender<Vec<f32>>>,
@@ -167,6 +134,7 @@ impl HVS {
         Ok(())
     }
 }
+#[allow(clippy::upper_case_acronyms)]
 struct HVR {
     reciver: Receiver<Receiver<Vec<f32>>>,
     v: Vec<Receiver<Vec<f32>>>,
@@ -195,10 +163,7 @@ impl HVR {
 async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
     let mut rh = ReadHelper::new(rh);
 
-    let rb = ringbuf::HeapRb::<f32>::new(32768);
-    let (mut rp, mut rc) = rb.split();
-
-    let mut hv = HV::default();
+    let hv = HV::default();
     let (mut hvs, mut hvr) = hv.split();
 
     let host = cpal::default_host();
