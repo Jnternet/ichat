@@ -11,10 +11,13 @@ use shared::{
     voice_chat::{C2S_VC_Msg, S2C_VC_Msg, VoiceGroupAuth},
 };
 use shared::{voice_chat::ArchivedS2C_VC_Msg, *};
-use std::io::stdin;
 use std::sync::Arc;
-use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
-use tokio::net::TcpStream;
+use std::{collections::HashMap, io::stdin};
+use tokio::{
+    io::{AsyncWriteExt, ReadHalf, WriteHalf},
+    sync::mpsc::{Sender, channel},
+};
+use tokio::{net::TcpStream, sync::mpsc::Receiver};
 use tokio_rustls::{TlsConnector, TlsStream};
 use uuid::Uuid;
 
@@ -84,10 +87,119 @@ fn get_audio_config() -> cpal::StreamConfig {
     }
 }
 
+#[derive(Default, Debug)]
+struct HV {
+    sender_hm: HashMap<Uuid, Sender<Vec<f32>>>,
+    rec_v: Vec<Receiver<Vec<f32>>>,
+}
+
+impl HV {
+    fn add(&mut self, id: Uuid) -> anyhow::Result<Sender<Vec<f32>>> {
+        let (s, r) = channel(4096);
+
+        self.sender_hm.insert(id, s.clone()).context("重复插入")?;
+        self.rec_v.push(r);
+
+        Ok(s)
+    }
+
+    fn send_vd(&mut self, msg: S2C_VC_Msg) -> anyhow::Result<()> {
+        let id = msg.sender_id;
+        let vd = msg.voice_data;
+
+        let o = self.sender_hm.get(&id);
+        let s = match o {
+            Some(s) => s.clone(),
+            None => self.add(id).unwrap(),
+        };
+        s.try_send(vd)?;
+
+        Ok(())
+    }
+    async fn one_sound(&mut self) -> Vec<Vec<f32>> {
+        let mut ans = Vec::new();
+
+        for r in &mut self.rec_v {
+            let Some(vd) = r.recv().await else {
+                continue;
+            };
+            ans.push(vd);
+        }
+        ans
+    }
+    fn split(self) -> (HVS, HVR) {
+        let (s, r) = channel(100);
+        let hvs = HVS {
+            sender: s,
+            hm: self.sender_hm,
+        };
+        let hvr = HVR {
+            reciver: r,
+            v: self.rec_v,
+        };
+        (hvs, hvr)
+    }
+}
+
+struct HVS {
+    sender: Sender<Receiver<Vec<f32>>>,
+    hm: HashMap<Uuid, Sender<Vec<f32>>>,
+}
+impl HVS {
+    fn add(&mut self, id: Uuid) -> anyhow::Result<Sender<Vec<f32>>> {
+        let (s, r) = channel(4096);
+
+        self.sender.try_send(r)?;
+        self.hm.insert(id, s.clone()).context("重复插入")?;
+        Ok(s)
+    }
+    fn send(&mut self, msg: S2C_VC_Msg) -> anyhow::Result<()> {
+        let id = msg.sender_id;
+        let vd = msg.voice_data;
+
+        let o = self.hm.get(&id);
+        let s = match o {
+            Some(s) => s.clone(),
+            None => self.add(id).unwrap(),
+        };
+        s.try_send(vd)?;
+
+        Ok(())
+    }
+}
+struct HVR {
+    reciver: Receiver<Receiver<Vec<f32>>>,
+    v: Vec<Receiver<Vec<f32>>>,
+}
+
+impl HVR {
+    fn update(&mut self) {
+        let Ok(r) = self.reciver.try_recv() else {
+            return;
+        };
+        self.v.push(r);
+    }
+    fn one_sound(&mut self) -> Vec<Vec<f32>> {
+        self.update();
+        let mut ans = Vec::new();
+        for r in &mut self.v {
+            let Ok(vd) = r.try_recv() else {
+                continue;
+            };
+            ans.push(vd);
+        }
+        ans
+    }
+}
+
 async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
     let mut rh = ReadHelper::new(rh);
+
     let rb = ringbuf::HeapRb::<f32>::new(32768);
     let (mut rp, mut rc) = rb.split();
+
+    let mut hv = HV::default();
+    let (mut hvs, mut hvr) = hv.split();
 
     let host = cpal::default_host();
     let output = host.default_output_device().unwrap();
@@ -97,9 +209,12 @@ async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
         .build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                data.iter_mut().zip(rc.pop_iter()).for_each(|(d, s)| {
-                    *d = (s * 2.0).tanh();
-                });
+                let v = hvr.one_sound();
+                for vd in v {
+                    data.iter_mut().zip(vd).for_each(|(d, s)| {
+                        *d = (s * 2.0).tanh();
+                    });
+                }
             },
             move |err| {
                 dbg!(&err);
@@ -118,7 +233,7 @@ async fn handle_read(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Result<()> {
         let s2c = rkyv::deserialize::<S2C_VC_Msg, rancor::Error>(ar)
             .context("cannot deserialize")
             .unwrap();
-        let _ = rp.push_slice(&s2c.voice_data);
+        hvs.send(s2c)?
     }
 
     Ok(())
