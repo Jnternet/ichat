@@ -166,12 +166,9 @@ fn textchat_stream(data: &SubData) -> iced::futures::stream::BoxStream<'static, 
                         match result {
                             Ok(0) => { break; }
                             Ok(_) => {
-                                match serde_json::from_slice::<S2C_Msg>(&buf) {
-                                    Ok(msg) => {
-                                        buf.clear();
-                                        let _ = output.send(Message::ServerMsg(msg)).await;
-                                    }
-                                    Err(_) => {}
+                                if let Ok(msg) =  serde_json::from_slice::<S2C_Msg>(&buf) {
+                                    buf.clear();
+                                    let _ = output.send(Message::ServerMsg(msg)).await;
                                 }
                             }
                             Err(e) => {
@@ -832,7 +829,7 @@ impl Chat {
 
         if let Some(groups) = &self.groups {
             for g in &groups.groups {
-                let is_selected = self.selected_group == Some(g.id);
+                let _is_selected = self.selected_group == Some(g.id);
                 let preview = g
                     .last_msg
                     .as_deref()

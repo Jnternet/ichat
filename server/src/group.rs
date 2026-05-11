@@ -3,251 +3,352 @@ use crate::entity::{account_group, groups};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use shared::account::AccountId;
+use shared::group::Group;
 use shared::group::{
     CreateGroup, CreateGroupSuccess, DeleteGroup, DeleteGroupSuccess, ExitGroup, ExitGroupSuccess,
     GetGroup, GetGroupSuccess, GroupId, JoinGroup, JoinGroupSuccess, ListGroups, ListGroupsSuccess,
 };
-use shared::{auth::Auth, group::Group};
+use tracing::{debug, error, info, instrument, warn};
 
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 
-// 从 axum 模块导入 AppState
 use crate::axum::AppState;
 
-#[axum::debug_handler]
+#[instrument(skip(state))]
 pub async fn route_create_group(
     State(state): State<AppState>,
     Json(cg): Json<CreateGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
-    let db = state.db;
-    match create_group(&db, cg).await {
-        Ok(gid) => Ok(Json(CreateGroupSuccess { group_id: gid })),
+    info!("Create group request for account: {}", cg.auth.account_id());
+    match create_group(&state.db, cg).await {
+        Ok(gid) => {
+            info!("Group created successfully: {}", gid.0);
+            Ok(Json(CreateGroupSuccess { group_id: gid }))
+        }
         Err(e) => {
-            dbg!(&e);
+            warn!("Create group failed: {:?}", e);
             Err(e)
         }
     }
 }
+
+#[instrument(skip(db))]
 pub async fn create_group(
     db: &impl ConnectionTrait,
     group: CreateGroup,
 ) -> Result<GroupId, GroupError> {
     let auth = group.auth;
-    // 1. 验证 token
+
     if !auth::auth(db, &auth).await {
+        warn!(
+            "Create group: No permission for account {}",
+            auth.account_id()
+        );
         return Err(GroupError::NoPermission);
     }
 
     let new_group = groups::ActiveModel {
         uuid: Set(uuid::Uuid::now_v7()),
-        group_name: Set(group.name),
+        group_name: Set(group.name.clone()),
         create_at: Set(Utc::now()),
     };
 
-    // 插入 group（如果 id 已存在会失败）
-    let g = new_group.insert(db).await.map_err(anyhow::Error::from)?;
+    let g = new_group.insert(db).await.map_err(|e| {
+        error!("Failed to insert group: {:?}", e);
+        anyhow::Error::from(e)
+    })?;
+    debug!("Group inserted: {} ({})", g.uuid, group.name);
     Ok(GroupId(g.uuid))
 }
 
-#[axum::debug_handler]
+#[instrument(skip(state))]
 pub async fn route_join_group(
     State(state): State<AppState>,
     Json(jg): Json<JoinGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
-    let db = state.db;
-    match join_group(&db, jg).await {
-        Ok(jgs) => Ok(Json(jgs)),
+    info!(
+        "Join group request: account={}, group={}",
+        jg.auth.account_id(),
+        jg.group_id.0
+    );
+    match join_group(&state.db, jg).await {
+        Ok(jgs) => {
+            info!(
+                "Joined group successfully: account={}, group={}",
+                jgs.uid.0, jgs.gid.0
+            );
+            Ok(Json(jgs))
+        }
         Err(e) => {
-            dbg!(&e);
+            warn!("Join group failed: {:?}", e);
             Err(e)
         }
     }
 }
+
+#[instrument(skip(db))]
 pub async fn join_group(
     db: &impl ConnectionTrait,
     jg: JoinGroup,
 ) -> Result<JoinGroupSuccess, GroupError> {
     let auth = jg.auth;
     let group_id = jg.group_id;
-    // 1. 验证 token
+
     if !auth::auth(db, &auth).await {
+        warn!(
+            "Join group: No permission for account {}",
+            auth.account_id()
+        );
         return Err(GroupError::NoPermission);
     }
 
-    // 2. 检查群组是否存在
     let group_entity = groups::Entity::find_by_id(group_id.0)
         .one(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to check group existence: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     if group_entity.is_none() {
+        warn!("Join group: Group not found {}", group_id.0);
         return Err(GroupError::GroupNotFound);
     }
 
-    // 3. 检查用户是否已经在群组中
     let existing = account_group::Entity::find()
         .filter(account_group::Column::AccountUuid.eq(auth.account_id()))
         .filter(account_group::Column::GroupUuid.eq(group_id.0))
         .one(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to check membership: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     if existing.is_some() {
-        // 用户已经在群组中，直接返回成功
-        let ans = JoinGroupSuccess {
+        debug!(
+            "Join group: Already in group {}, account {}",
+            group_id.0,
+            auth.account_id()
+        );
+        return Ok(JoinGroupSuccess {
             gid: group_id,
             uid: AccountId(auth.account_id()),
-        };
-        return Ok(ans);
+        });
     }
 
-    // 4. 将用户添加到群组
     let new_account_group = account_group::ActiveModel {
         account_uuid: Set(auth.account_id()),
         group_uuid: Set(group_id.0),
         ..Default::default()
     };
 
-    new_account_group
-        .insert(db)
-        .await
-        .map_err(anyhow::Error::from)?;
+    new_account_group.insert(db).await.map_err(|e| {
+        error!("Failed to insert membership: {:?}", e);
+        anyhow::Error::from(e)
+    })?;
 
-    let ans = JoinGroupSuccess {
+    Ok(JoinGroupSuccess {
         gid: group_id,
         uid: AccountId(auth.account_id()),
-    };
-    Ok(ans)
+    })
 }
-#[axum::debug_handler]
+#[instrument(skip(state))]
 pub async fn route_exit_group(
     State(state): State<AppState>,
     Json(eg): Json<ExitGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
-    let db = state.db;
-    if let Err(e) = exit_group(&db, eg).await {
-        dbg!(&e);
-        return Err(e);
+    info!(
+        "Exit group request: account={}, group={}",
+        eg.auth.account_id(),
+        eg.group_id.0
+    );
+    let a = eg.auth.account_id();
+    let gid = eg.group_id.0;
+    match exit_group(&state.db, eg).await {
+        Ok(_) => {
+            info!("Exited group successfully: account={}, group={}", a, gid);
+            Ok(Json(ExitGroupSuccess))
+        }
+        Err(e) => {
+            warn!("Exit group failed: {:?}", e);
+            Err(e)
+        }
     }
-    Ok(Json(ExitGroupSuccess))
 }
+
+#[instrument(skip(db))]
 pub async fn exit_group(db: &impl ConnectionTrait, eg: ExitGroup) -> Result<(), GroupError> {
     let auth = eg.auth;
     let group_id = eg.group_id;
-    // 1. 验证 token
+
     if !auth::auth(db, &auth).await {
+        warn!(
+            "Exit group: No permission for account {}",
+            auth.account_id()
+        );
         return Err(GroupError::NoPermission);
     }
 
-    // 2. 检查群组是否存在
     let group_entity = groups::Entity::find_by_id(group_id.0)
         .one(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to check group existence: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     if group_entity.is_none() {
+        warn!("Exit group: Group not found {}", group_id.0);
         return Err(GroupError::GroupNotFound);
     }
 
-    // 3. 检查用户是否在群组中
     let existing = account_group::Entity::find()
         .filter(account_group::Column::AccountUuid.eq(auth.account_id()))
         .filter(account_group::Column::GroupUuid.eq(group_id.0))
         .one(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to check membership: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     if existing.is_none() {
-        // 用户不在群组中，直接返回成功
+        debug!(
+            "Exit group: Not in group {}, account {}",
+            group_id.0,
+            auth.account_id()
+        );
         return Ok(());
     }
 
-    // 4. 将用户从群组中移除
-    let delete_result = account_group::Entity::delete_many()
+    let _delete_result = account_group::Entity::delete_many()
         .filter(account_group::Column::AccountUuid.eq(auth.account_id()))
         .filter(account_group::Column::GroupUuid.eq(group_id.0))
         .exec(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to remove membership: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     Ok(())
 }
 
-#[axum::debug_handler]
+#[instrument(skip(state))]
 pub async fn route_delete_group(
     State(state): State<AppState>,
     Json(dg): Json<DeleteGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
-    let db = state.db;
-    if let Err(e) = delete_group(&db, dg).await {
-        dbg!(&e);
-        return Err(e);
+    info!(
+        "Delete group request: account={}, group={}",
+        dg.auth.account_id(),
+        dg.group_id.0
+    );
+    let gid = dg.group_id;
+    match delete_group(&state.db, dg).await {
+        Ok(_) => {
+            info!("Deleted group successfully: {}", gid.0);
+            Ok(Json(DeleteGroupSuccess))
+        }
+        Err(e) => {
+            warn!("Delete group failed: {:?}", e);
+            Err(e)
+        }
     }
-    Ok(Json(DeleteGroupSuccess))
 }
+
+#[instrument(skip(db))]
 pub async fn delete_group(db: &impl ConnectionTrait, dg: DeleteGroup) -> Result<(), GroupError> {
     let auth = dg.auth;
     let group_id = dg.group_id;
-    // 1. 验证 token
+
     if !auth::auth(db, &auth).await {
+        warn!(
+            "Delete group: No permission for account {}",
+            auth.account_id()
+        );
         return Err(GroupError::NoPermission);
     }
 
-    // 2. 检查群组是否存在
     let group_entity = groups::Entity::find_by_id(group_id.0)
         .one(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to check group existence: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     if group_entity.is_none() {
+        warn!("Delete group: Group not found {}", group_id.0);
         return Err(GroupError::GroupNotFound);
     }
 
-    // 3. 删除群组（级联删除会自动删除相关的 account_group 记录）
-    let delete_result = groups::Entity::delete_by_id(group_id.0)
+    groups::Entity::delete_by_id(group_id.0)
         .exec(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to delete group: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     Ok(())
 }
 
-#[axum::debug_handler]
+#[instrument(skip(state))]
 pub async fn route_list_groups(
     State(state): State<AppState>,
     Json(lg): Json<ListGroups>,
 ) -> Result<impl IntoResponse, GroupError> {
-    let db = state.db;
-    let groups = list_groups(&db, lg).await?;
-    Ok(Json(ListGroupsSuccess { groups }))
+    info!("List groups request for account: {}", lg.auth.account_id());
+    match list_groups(&state.db, lg).await {
+        Ok(groups) => {
+            info!("List groups successful, found {} groups", groups.len());
+            Ok(Json(ListGroupsSuccess { groups }))
+        }
+        Err(e) => {
+            warn!("List groups failed: {:?}", e);
+            Err(e)
+        }
+    }
 }
+
+#[instrument(skip(db))]
 pub async fn list_groups(
     db: &impl ConnectionTrait,
     lg: ListGroups,
 ) -> Result<Vec<Group>, GroupError> {
     let auth = lg.auth;
-    // 1. 验证 token
+
     if !auth::auth(db, &auth).await {
+        warn!(
+            "List groups: No permission for account {}",
+            auth.account_id()
+        );
         return Err(GroupError::NoPermission);
     }
 
-    // 2. 获取用户加入的群组
     let account_groups = account_group::Entity::find()
         .filter(account_group::Column::AccountUuid.eq(auth.account_id()))
         .all(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to get account groups: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
-    // 3. 获取每个群组的详细信息
     let mut groups = Vec::new();
     for ag in account_groups {
         let group_entity = groups::Entity::find_by_id(ag.group_uuid)
             .one(db)
             .await
-            .map_err(anyhow::Error::from)?;
+            .map_err(|e| {
+                error!("Failed to get group info: {:?}", e);
+                anyhow::Error::from(e)
+            })?;
 
         if let Some(group) = group_entity {
             groups.push(Group {
@@ -260,28 +361,45 @@ pub async fn list_groups(
     Ok(groups)
 }
 
-#[axum::debug_handler]
+#[instrument(skip(state))]
 pub async fn route_get_group(
     State(state): State<AppState>,
     Json(gg): Json<GetGroup>,
 ) -> Result<impl IntoResponse, GroupError> {
-    let db = state.db;
-    let group = get_group(&db, gg).await?;
-    Ok(Json(GetGroupSuccess { group }))
+    info!(
+        "Get group request: account={}, group={}",
+        gg.auth.account_id(),
+        gg.group_id.0
+    );
+    match get_group(&state.db, gg).await {
+        Ok(group) => {
+            info!("Get group successful: {} ({})", group.id.0, group.name);
+            Ok(Json(GetGroupSuccess { group }))
+        }
+        Err(e) => {
+            warn!("Get group failed: {:?}", e);
+            Err(e)
+        }
+    }
 }
+
+#[instrument(skip(db))]
 pub async fn get_group(db: &impl ConnectionTrait, gg: GetGroup) -> Result<Group, GroupError> {
     let auth = gg.auth;
     let group_id = gg.group_id;
-    // 1. 验证 token
+
     if !auth::auth(db, &auth).await {
+        warn!("Get group: No permission for account {}", auth.account_id());
         return Err(GroupError::NoPermission);
     }
 
-    // 2. 检查群组是否存在
     let group_entity = groups::Entity::find_by_id(group_id.0)
         .one(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to get group: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     if let Some(group) = group_entity {
         Ok(Group {
@@ -289,6 +407,7 @@ pub async fn get_group(db: &impl ConnectionTrait, gg: GetGroup) -> Result<Group,
             name: group.group_name,
         })
     } else {
+        warn!("Get group: Group not found {}", group_id.0);
         Err(GroupError::GroupNotFound)
     }
 }

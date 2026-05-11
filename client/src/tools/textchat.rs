@@ -8,7 +8,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio_rustls::{TlsConnector, TlsStream};
+use tracing::{debug, error, info, instrument};
 
+#[instrument(skip(db, recv, send))]
 pub async fn text_chat(
     auth: Auth,
     db: DatabaseConnection,
@@ -17,103 +19,102 @@ pub async fn text_chat(
 ) -> anyhow::Result<()> {
     let server_addr = std::env::var("SERVER_TEXTCHAT_ADDR")?;
     let server_name = std::env::var("SERVER_NAME")?;
-    eprintln!("[textchat] 连接服务器: {} ({})", server_addr, server_name);
+    info!(
+        "[textchat] Connecting to server: {} ({})",
+        server_addr, server_name
+    );
 
     let connector = get_connector();
     let mut tls_stream = match get_tls_stream(&connector, &server_addr, &server_name).await {
         Ok(s) => {
-            eprintln!("[textchat] TLS 连接成功");
+            info!("[textchat] TLS connection established");
             s
         }
         Err(e) => {
-            eprintln!("[textchat] TLS 连接失败: {:?}", e);
+            error!("[textchat] TLS connection failed: {:?}", e);
             return Err(e);
         }
     };
 
     let auth_json = serde_json::to_vec(&auth)?;
-    eprintln!("[textchat] 发送 Auth ({} bytes)", auth_json.len());
+    debug!("[textchat] Sending auth ({} bytes)", auth_json.len());
     tls_stream.write_all(&auth_json).await?;
     tls_stream.flush().await?;
-    eprintln!("[textchat] Auth 发送完毕，分离读写流");
+    info!("[textchat] Auth sent, splitting read/write streams");
 
     let (read_half, write_half) = tokio::io::split(tls_stream);
     let db_ = db.clone();
 
-    // 接收消息的任务
     tokio::spawn(async move {
-        eprintln!("[textchat] 接收任务启动");
+        info!("[textchat] Receive task started");
         let mut read_half = read_half;
         let mut buf = bytes::BytesMut::with_capacity(1024);
         let s = send;
         loop {
             match read_half.read_buf(&mut buf).await {
                 Ok(0) => {
-                    eprintln!("[textchat] 服务器关闭连接");
+                    info!("[textchat] Server closed connection");
                     break;
                 }
                 Ok(n) => {
-                    eprintln!(
-                        "[textchat] 收到 {} bytes，buf 总长 {}: {:?}",
-                        n,
-                        buf.len(),
-                        &buf[..]
-                    );
+                    debug!("[textchat] Received {} bytes, total buf: {}", n, buf.len());
                     let msg = serde_json::from_slice::<shared::message::S2C_Msg>(&buf);
                     match msg {
                         Ok(s2c_msg) => {
-                            eprintln!("[textchat] 解析消息成功，保存到 db");
+                            debug!("[textchat] Message parsed successfully, saving to db");
                             buf.clear();
                             match save_msg(&db_, &s2c_msg).await {
                                 Ok(_) => {
-                                    s.send(()).await.unwrap();
+                                    let _ = s.send(()).await;
                                 }
                                 Err(e) => {
-                                    eprintln!("[textchat] 保存消息失败: {:?}", e);
+                                    error!("[textchat] Failed to save message: {:?}", e);
                                     break;
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("[textchat] 解析消息失败 (buf {} bytes): {:?}", buf.len(), e);
-                            // 数据不完整时不清空，等待更多数据；若已确认损坏则清空
+                            debug!(
+                                "[textchat] Failed to parse message (buf {} bytes): {:?}",
+                                buf.len(),
+                                e
+                            );
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("[textchat] 读取失败: {:?}", e);
+                    error!("[textchat] Read failed: {:?}", e);
                     break;
                 }
             }
         }
-        eprintln!("[textchat] 接收任务退出");
+        info!("[textchat] Receive task exiting");
     });
 
-    // 发送消息的任务
     tokio::spawn(async move {
-        eprintln!("[textchat] 发送任务启动");
+        info!("[textchat] Send task started");
         let mut wh = write_half;
         while let Some(msg) = recv.recv().await {
             let b = serde_json::to_vec(&msg).unwrap();
-            eprintln!("[textchat] 发送消息 {} bytes", b.len());
+            debug!("[textchat] Sending message {} bytes", b.len());
             match wh.write_all(&b).await {
                 Ok(_) => {}
                 Err(e) => {
-                    eprintln!("[textchat] 发送失败: {:?}", e);
+                    error!("[textchat] Send failed: {:?}", e);
                     break;
                 }
             }
             match wh.flush().await {
                 Ok(_) => {
-                    eprintln!("[textchat] 消息发送并 flush 完毕");
+                    debug!("[textchat] Message sent and flushed");
                 }
                 Err(e) => {
-                    eprintln!("[textchat] flush 失败: {:?}", e);
+                    error!("[textchat] Flush failed: {:?}", e);
                     break;
                 }
             }
         }
-        eprintln!("[textchat] 发送任务退出");
+        info!("[textchat] Send task exiting");
     });
 
     Ok(())

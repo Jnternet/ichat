@@ -32,7 +32,7 @@ impl LoginResponse {
     pub fn success(self) -> Option<LoginSuccess> {
         match self {
             LoginResponse::Success(s) => Some(s),
-            LoginResponse::Fail(e) => None,
+            LoginResponse::Fail(_e) => None,
         }
     }
 }

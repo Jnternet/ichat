@@ -9,7 +9,6 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sea_orm::QueryFilter;
 use sea_orm::{Database, DatabaseConnection, EntityTrait};
-use shared::account::OtherUser;
 use shared::account::UserInfo;
 use shared::auth::Auth;
 use shared::group::GroupId;
@@ -21,33 +20,56 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio_rustls::{TlsAcceptor, TlsStream};
+use tracing::{debug, error, info, instrument, warn};
 
 const MAX_MSG_NUM: usize = 100;
 
+#[instrument]
 pub async fn run() -> anyhow::Result<()> {
-    //准备数据库
+    info!("Initializing text chat server...");
+
     let server_db_url = std::env::var("SERVER_DATABASE")?;
-    let db = Database::connect(server_db_url).await?;
+    info!("Connecting to database: {}", server_db_url);
+    let db = Database::connect(server_db_url).await.map_err(|e| {
+        error!("Failed to connect to database: {:?}", e);
+        e
+    })?;
+    info!("Database connection established");
 
     let server_addr = std::env::var("SERVER_TEXTCHAT_ADDR")?;
-    let listener = TcpListener::bind(server_addr).await?;
+    info!("Binding to address: {}", server_addr);
+    let listener = TcpListener::bind(server_addr.clone()).await.map_err(|e| {
+        error!("Failed to bind to address {}: {:?}", server_addr, e);
+        e
+    })?;
 
-    let tls_acceptor = get_acceptor().await?;
+    let tls_acceptor = get_acceptor().await.map_err(|e| {
+        error!("Failed to create TLS acceptor: {:?}", e);
+        e
+    })?;
+    info!("TLS acceptor created");
 
     let online_groups = OnlineGroups::new();
+    info!("Text chat server ready, waiting for connections...");
 
     loop {
         let (stream, addr) = listener.accept().await?;
-        eprintln!("客户端连接: {}", addr);
-        let tls_stream = tls_acceptor.accept(stream).await?;
-        let tls_stream = TlsStream::from(tls_stream);
+        info!("Client connected: {}", addr);
+
+        let tls_stream = match tls_acceptor.accept(stream).await {
+            Ok(s) => TlsStream::from(s),
+            Err(e) => {
+                warn!("TLS handshake failed for {}: {:?}", addr, e);
+                continue;
+            }
+        };
 
         let db_ = db.clone();
         let online_groups_ = online_groups.clone();
         tokio::spawn(async move {
             let r = handle_client(db_, tls_stream, online_groups_).await;
             if r.is_err() {
-                dbg!(&r);
+                error!("Client handler error: {:?}", r);
             }
         });
     }
@@ -128,6 +150,7 @@ pub async fn get_acceptor() -> anyhow::Result<TlsAcceptor> {
     anyhow::Ok(TlsAcceptor::from(Arc::new(server_config)))
 }
 
+#[instrument(skip(db, online_groups))]
 pub async fn handle_client(
     db: DatabaseConnection,
     tls_stream: TlsStream<tokio::net::TcpStream>,
@@ -140,6 +163,8 @@ pub async fn handle_client(
         .await
         .context("cannot read from client")?;
     let auth = serde_json::from_slice::<Auth>(&buf[..u]).context("cannot get auth")?;
+    debug!("Received auth from account: {}", auth.account_id());
+
     let v_ag: Vec<_> = AccountGroup::find()
         .filter(account_group::COLUMN.account_uuid.eq(auth.account_id()))
         .all(&db)
@@ -147,22 +172,36 @@ pub async fn handle_client(
         .iter()
         .map(|m| GroupId(m.group_uuid))
         .collect();
+    debug!("User {} joined {} groups", auth.account_id(), v_ag.len());
+
     let mut v = Vec::new();
     for gid in &v_ag {
-        //理应都有,不应凋亡
         v.push(online_groups.join(gid).await);
     }
     let sa = futures::stream::select_all(v);
-    eprintln!("准备启动rh与wh");
+    info!(
+        "Starting read/write handlers for account: {}",
+        auth.account_id()
+    );
+
+    let auth_ = auth.clone();
     tokio::select! {
-        r = handle_rh(db,rh,online_groups.clone(),auth) => {
-            dbg!(&r);
+        r = handle_rh(db, rh, online_groups.clone(), auth_) => {
+            if r.is_err() {
+                warn!("Read handler error: {:?}", r);
+            }
         },
-        r = handle_wh(wh,sa) => {
-            dbg!(&r);
+        r = handle_wh(wh, sa) => {
+            if r.is_err() {
+                warn!("Write handler error: {:?}", r);
+            }
         },
     }
-    eprintln!("出现错误，退出所有群组");
+
+    info!(
+        "Disconnecting, exiting all groups for account: {}",
+        auth.account_id()
+    );
     for gid in &v_ag {
         online_groups.exit(gid).await
     }
@@ -170,20 +209,24 @@ pub async fn handle_client(
     anyhow::Ok(())
 }
 
-//todo: 验证是否有权发送到指定的群
+#[instrument(skip(db, online_groups))]
 async fn handle_rh(
     db: DatabaseConnection,
     mut read_half: ReadHalf<TlsStream<tokio::net::TcpStream>>,
     online_groups: OnlineGroups<S2C_Msg>,
     _auth: Auth,
 ) -> anyhow::Result<()> {
-    eprintln!("进入handle_rh");
+    info!("Starting read handler for account: {}", _auth.account_id());
     loop {
         let mut buf = bytes::BytesMut::with_capacity(1024);
         read_half.read_buf(&mut buf).await?;
         let msg = serde_json::from_slice::<C2S_Msg>(&buf)?;
-        // buf.clear();
-        //保存到数据库
+        debug!(
+            "Received message from {} to group {}",
+            _auth.account_id(),
+            msg.target().0
+        );
+
         let m = save_msg(&db, msg.clone()).await?;
         let sender_id = msg.auth().account_id();
         let sender_name = Accounts::find_by_id(sender_id)
@@ -198,25 +241,28 @@ async fn handle_rh(
             *msg.target(),
             msg.time(),
         );
-        //缩短持有锁的时间
+
         let gs = {
             let mg = online_groups.0.lock().await;
             mg.get(msg.target()).context("没有创建在线群组")?.clone()
         };
         gs.sender.broadcast_direct(s2c).await?;
+        debug!("Broadcast message to group {}", msg.target().0);
     }
 }
 
+#[instrument]
 async fn handle_wh(
     mut write_half: WriteHalf<TlsStream<tokio::net::TcpStream>>,
     mut sa: stream::SelectAll<Receiver<S2C_Msg>>,
 ) -> anyhow::Result<()> {
-    eprintln!("进入handle_wh");
+    info!("Starting write handler");
     while let Some(m) = sa.next().await {
         write_half
             .write_all(serde_json::to_vec(&m)?.as_slice())
             .await?;
         write_half.flush().await?;
+        debug!("Sent message to client");
     }
     Ok(())
 }

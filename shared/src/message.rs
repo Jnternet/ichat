@@ -2,11 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-    account::{AccountId, OtherUser, UserInfo},
-    auth::Auth,
-    group::GroupId,
-};
+use crate::{account::UserInfo, auth::Auth, group::GroupId};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Msg {
     text: String,

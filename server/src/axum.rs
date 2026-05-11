@@ -2,6 +2,11 @@ use axum::{Router, routing::post};
 use axum_server::tls_rustls::RustlsConfig;
 use sea_orm::Database;
 use std::net::SocketAddr;
+use tracing::{error, info, instrument};
+
+pub use shared::tracing;
+pub use shared::tracing_appender;
+pub use shared::tracing_subscriber;
 
 // 导入路由处理函数
 use crate::group::{
@@ -17,14 +22,20 @@ pub struct AppState {
     pub db: sea_orm::DatabaseConnection,
 }
 
-/// 启动https服务器
+#[instrument]
 pub async fn run_https_server() -> anyhow::Result<()> {
-    //准备数据库
+    info!("Initializing HTTPS server...");
+
     let server_db_url = std::env::var("SERVER_DATABASE")?;
-    let db = Database::connect(server_db_url).await?;
-    //准备状态
+    info!("Connecting to database: {}", server_db_url);
+    let db = Database::connect(server_db_url).await.map_err(|e| {
+        error!("Failed to connect to database: {:?}", e);
+        e
+    })?;
+    info!("Database connection established");
+
     let app_state = AppState { db };
-    // 你的路由
+    info!("Building router with {} routes", 9);
     let app = Router::new()
         .route(r"/login", post(login))
         .route(r"/register", post(register))
@@ -37,20 +48,26 @@ pub async fn run_https_server() -> anyhow::Result<()> {
         .route(r"/update_info", post(update_info))
         .with_state(app_state);
 
-    // 載入證書與私鑰（PEM 格式）
-    // 正式環境請使用 Let's Encrypt 或其他正規憑證
-    let tls_config = RustlsConfig::from_pem_file(
-        "items/cert/fullchain.pem", // 憑證（通常包含中間憑證）
-        "items/cert/privkey.pem",   // 私鑰
-    )
-    .await?;
+    let tls_config =
+        RustlsConfig::from_pem_file("items/cert/fullchain.pem", "items/cert/privkey.pem")
+            .await
+            .map_err(|e| {
+                error!("Failed to load TLS certificates: {:?}", e);
+                e
+            })?;
+    info!("TLS configuration loaded");
 
     let addr = std::env::var("SERVER_HTTPS_ADDR")?.parse::<SocketAddr>()?;
+    info!("Starting HTTPS server on {}", addr);
 
-    // 啟動 HTTPS 伺服器
     axum_server::bind_rustls(addr, tls_config)
         .serve(app.into_make_service())
-        .await?;
+        .await
+        .map_err(|e| {
+            error!("HTTPS server error: {:?}", e);
+            e
+        })?;
 
+    info!("HTTPS server stopped");
     Ok(())
 }

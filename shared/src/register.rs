@@ -14,6 +14,8 @@ pub struct RegisterSuccess;
 pub enum RegisterError {
     #[error("this account is already existence")]
     AlreadyExist,
+    #[error("Server error")]
+    ServerWrong,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

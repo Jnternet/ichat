@@ -1,3 +1,7 @@
+pub use shared::tracing;
+pub use shared::tracing_appender;
+pub use shared::tracing_subscriber;
+
 pub mod auth;
 pub mod axum;
 pub mod entity;

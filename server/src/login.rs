@@ -2,7 +2,7 @@ use crate::entity::accounts;
 use crate::entity::auths;
 use crate::entity::prelude::*;
 use axum::extract::State;
-use axum::{Json, response::IntoResponse, routing::post};
+use axum::{Json, response::IntoResponse};
 use sea_orm::ConnectionTrait;
 use sea_orm::EntityTrait;
 use sea_orm::QueryFilter;
@@ -10,52 +10,60 @@ use sea_orm::TransactionTrait;
 use sea_orm::{ActiveModelTrait, Set};
 use shared::auth::Auth;
 use shared::login::*;
+use tracing::{debug, info, instrument, warn};
 
-// 从 axum 模块导入 AppState
 use crate::axum::AppState;
 
-#[axum::debug_handler]
+#[instrument(skip(state, login))]
 pub async fn login(
     State(state): State<AppState>,
     Json(login): Json<Login>,
 ) -> Result<impl IntoResponse, LoginError> {
+    info!("Login attempt for account: {}", login.account);
     match _login(state, login).await {
-        Ok(ir) => Ok(ir),
+        Ok(ir) => {
+            info!("Login successful");
+            Ok(ir)
+        }
         Err(e) => {
             let r = e.downcast::<LoginError>();
             if r.is_err() {
                 let e = r.as_ref().err().unwrap();
-                dbg!(&e);
+                error!("Login internal error: {:?}", e);
                 return Err(LoginError::ServerWrong);
             }
-            Err(r.unwrap())
+            let err = r.unwrap();
+            warn!("Login failed: {:?}", err);
+            Err(err)
         }
     }
 }
 
+#[instrument(skip(state))]
 async fn _login(state: AppState, login: Login) -> anyhow::Result<impl IntoResponse> {
     let db = state.db;
     let txn = db.begin().await?;
 
-    //查看登录请求是否合规
+    debug!("Checking account existence: {}", login.account);
     let opt_ac = Accounts::find()
-        .filter(accounts::COLUMN.account.eq(login.account))
+        .filter(accounts::COLUMN.account.eq(login.account.clone()))
         .one(&txn)
         .await?;
-    //是否存在
+
     if opt_ac.is_none() {
+        warn!("Account not found: {}", login.account);
         return Err(LoginError::NotExist.into());
     }
     let ac = opt_ac.unwrap();
-    //密码是否正确
+
     if ac.password != login.password {
+        warn!("Wrong password for account: {}", login.account);
         return Err(LoginError::WrongPassword.into());
     }
-    //删除过期token
-    let _dr = remove_expired_token(&txn, &ac.uuid).await?;
 
-    //此时必然账号存在且密码正确
-    //创建令牌
+    let removed = remove_expired_token(&txn, &ac.uuid).await?;
+    debug!("Removed {} expired tokens for account {}", removed, ac.uuid);
+
     let au = auths::ActiveModel {
         token: Set(uuid::Uuid::now_v7()),
         account: Set(ac.uuid),
@@ -64,13 +72,15 @@ async fn _login(state: AppState, login: Login) -> anyhow::Result<impl IntoRespon
     .insert(&txn)
     .await?;
 
-    //事务提交
     txn.commit().await?;
+    debug!("Token created for account: {}", ac.uuid);
 
     Ok(Json(LoginSuccess {
         auth: Auth::new(au.account, &au.token.to_string()),
     }))
 }
+
+#[instrument(skip(db))]
 async fn remove_expired_token(
     db: &impl ConnectionTrait,
     account_id: &uuid::Uuid,
@@ -78,16 +88,20 @@ async fn remove_expired_token(
     let now = chrono::Utc::now();
     let token_expire_time = std::env::var("TOKEN_EXPIRE_TIME")?.parse::<i64>()?;
     let td = chrono::Duration::seconds(token_expire_time);
-    //这是最后的未超期时间
     let t = now - td;
     let v_a = Auths::delete_many()
         .filter(auths::COLUMN.account.eq(*account_id))
         .filter(auths::COLUMN.create_at.lt(t))
         .exec(db)
         .await?;
-    eprintln!("删除过期token共:{}条,uuid={account_id}", &v_a.rows_affected);
+    debug!(
+        "Removed {} expired tokens for account {}",
+        v_a.rows_affected, account_id
+    );
     Ok(v_a.rows_affected)
 }
+
+use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoginError {

@@ -1,46 +1,47 @@
 use crate::auth;
 use crate::entity::{groups, messages};
 use anyhow;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Set};
 use shared::message::C2S_Msg;
+use tracing::{debug, error, instrument, warn};
 use uuid;
 
 const MAX_MESSAGE_LENGTH: usize = 1000;
-/// TODO: 需要检查是否有权在群组中发信息
-/// 保存消息的函数
-///
-/// # 参数
-/// - `db`: 数据库连接
-/// - `msg`: 客户端发送的消息
-///
-/// # 返回值
-/// - `Ok(())`: 消息保存成功
-/// - `Err(MessageError::NoPermission)`: 权限验证失败
-/// - `Err(MessageError::GroupNotFound)`: 目标群组不存在
-/// - `Err(MessageError::UnKnown)`: 其他未知错误
+
+#[instrument(skip(db))]
 pub async fn save_msg(
     db: &impl ConnectionTrait,
     msg: C2S_Msg,
 ) -> Result<messages::Model, MessageError> {
-    // 1. 验证 token
+    debug!(
+        "Saving message from account {} to group {}",
+        msg.auth().account_id(),
+        msg.target().0
+    );
+
     if !auth::auth(db, msg.auth()).await {
+        warn!(
+            "Save message: No permission for account {}",
+            msg.auth().account_id()
+        );
         return Err(MessageError::NoPermission);
     }
 
-    // 2. 检查群组是否存在
     let group_entity = groups::Entity::find_by_id(msg.target().0)
         .one(db)
         .await
-        .map_err(anyhow::Error::from)?;
+        .map_err(|e| {
+            error!("Failed to check group existence: {:?}", e);
+            anyhow::Error::from(e)
+        })?;
 
     if group_entity.is_none() {
+        warn!("Save message: Group not found {}", msg.target().0);
         return Err(MessageError::GroupNotFound);
     }
 
-    // 3. 验证消息内容
     validate_message(&msg)?;
 
-    // 4. 保存消息到数据库
     use crate::entity::messages;
     let new_message = messages::ActiveModel {
         uuid: Set(uuid::Uuid::now_v7()),
@@ -50,27 +51,28 @@ pub async fn save_msg(
         create_at: Set(msg.time()),
     };
 
-    Ok(new_message.insert(db).await.map_err(anyhow::Error::from)?)
+    let saved_msg = new_message.insert(db).await.map_err(|e| {
+        error!("Failed to save message: {:?}", e);
+        anyhow::Error::from(e)
+    })?;
+
+    debug!("Message saved successfully: {}", saved_msg.uuid);
+    Ok(saved_msg)
 }
 
-/// 验证消息的函数
-///
-/// # 参数
-/// - `msg`: 要验证的消息
-///
-/// # 返回值
-/// - `Ok(())`: 消息验证成功
-/// - `Err(MessageError::UnKnown)`: 消息验证失败
 fn validate_message(msg: &C2S_Msg) -> Result<(), MessageError> {
-    // 验证消息文本不为空
     if msg.msg().text().is_empty() {
+        warn!("Message validation failed: empty text");
         return Err(MessageError::UnKnown(anyhow::anyhow!(
             "Message text cannot be empty"
         )));
     }
 
-    // 验证消息文本长度不超过最大限制（例如 1000 字符）
     if msg.msg().text().len() > MAX_MESSAGE_LENGTH {
+        warn!(
+            "Message validation failed: text too long ({} chars)",
+            msg.msg().text().len()
+        );
         return Err(MessageError::UnKnown(anyhow::anyhow!(
             "Message text too long, maximum length is {MAX_MESSAGE_LENGTH} characters"
         )));

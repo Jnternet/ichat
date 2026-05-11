@@ -4,6 +4,7 @@ use server::axum;
 use server::textchat;
 use server::voice_chat;
 use shared::log::init_log;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -12,28 +13,31 @@ async fn main() -> Result<()> {
         .install_default()
         .expect("unable to set aws_lc_rs as provider");
     let _g = init_log("server");
-    // 启动登录服务器
+    info!("Server starting...");
+
     tokio::spawn(async {
-        if let Err(e) = axum::run_https_server().await {
-            dbg!(&e);
+        match axum::run_https_server().await {
+            Ok(_) => info!("HTTPS server stopped gracefully"),
+            Err(e) => error!("HTTPS server error: {:?}", e),
         }
     });
 
-    // 启动文本聊天服务器
     tokio::spawn(async {
-        if let Err(e) = textchat::run().await {
-            dbg!(&e);
+        match textchat::run().await {
+            Ok(_) => info!("Text chat server stopped gracefully"),
+            Err(e) => error!("Text chat server error: {:?}", e),
         }
     });
 
-    // 启动语音聊天服务器
     tokio::spawn(async {
-        if let Err(e) = voice_chat::run().await {
-            dbg!(&e);
+        match voice_chat::run().await {
+            Ok(_) => info!("Voice chat server stopped gracefully"),
+            Err(e) => error!("Voice chat server error: {:?}", e),
         }
     });
 
-    // 保持主线程运行
+    info!("All services started successfully");
     tokio::signal::ctrl_c().await?;
+    info!("Server shutting down...");
     Ok(())
 }

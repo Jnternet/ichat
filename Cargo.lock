@@ -1052,6 +1052,9 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "uuid",
  "webpki-roots 1.0.7",
 ]
@@ -5193,6 +5196,9 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "uuid",
 ]
 

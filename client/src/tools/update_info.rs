@@ -21,31 +21,48 @@ use shared::update_info::GetUpdate;
 use shared::update_info::NewMessages;
 use shared::update_info::UpdateInfoError;
 use shared::update_info::UpdateInfoResponse;
+use tracing::{debug, error, info, instrument, warn};
 
+#[instrument(skip(client))]
 pub async fn update_info(
     client: &Client,
     url: &str,
     get_update: &GetUpdate,
 ) -> anyhow::Result<UpdateInfoResponse> {
     let url = format!("{}update_info", url);
-    let text = client
-        .post(url)
-        .json(get_update)
-        .send()
-        .await?
-        .text()
-        .await?;
+    info!(
+        "Update info request to {} for account: {}",
+        url,
+        get_update.auth.account_id()
+    );
+
+    let response = match client.post(url).json(get_update).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Update info request failed: {:?}", e);
+            return Err(e.into());
+        }
+    };
+
+    let text = response.text().await?;
     let result = serde_json::from_str::<NewMessages>(&text);
     if let Ok(s) = result {
+        info!(
+            "Update info successful, received {} messages",
+            s.messages().len()
+        );
         return Ok(UpdateInfoResponse::Success(s));
     }
     let result = serde_json::from_str::<UpdateInfoError>(&text);
     if let Ok(e) = result {
+        warn!("Update info failed: {:?}", e);
         return Ok(UpdateInfoResponse::Fail(e));
     }
+    error!("Cannot resolve update info response");
     bail!("cannot resolve response")
 }
 
+#[instrument(skip(db, client))]
 pub async fn save_to_db(
     db: &DatabaseConnection,
     client: &Client,
@@ -53,38 +70,45 @@ pub async fn save_to_db(
     nm: NewMessages,
     auth: &Auth,
 ) -> anyhow::Result<()> {
+    info!("Saving {} messages to local database", nm.messages().len());
     let txn = db.begin().await?;
 
-    // 遍历所有消息并保存到数据库
-    for msg in nm.messages() {
-        // 检查并创建用户记录
+    for (i, msg) in nm.messages().iter().enumerate() {
+        debug!("Processing message {}/{}", i + 1, nm.messages().len());
+
         let account_id = msg.sender().id();
         let account = accounts::Entity::find_by_id(account_id)
             .one(&txn)
             .await
-            .map_err(anyhow::Error::from)?;
+            .map_err(|e| {
+                error!("Failed to check account: {:?}", e);
+                anyhow::Error::from(e)
+            })?;
 
         if account.is_none() {
-            // 创建用户记录
+            debug!("Creating new account record: {}", account_id);
             let new_account = accounts::ActiveModel {
                 uuid: sea_orm::Set(account_id),
                 user_name: sea_orm::Set(msg.sender().user_name().to_string()),
                 account: sea_orm::Set(msg.sender().user_name().to_string()),
             };
-            new_account
-                .insert(&txn)
-                .await
-                .map_err(anyhow::Error::from)?;
+            new_account.insert(&txn).await.map_err(|e| {
+                error!("Failed to insert account: {:?}", e);
+                anyhow::Error::from(e)
+            })?;
         }
 
-        // 检查并创建群组记录
         let group_id = msg.target().0;
         let group = groups::Entity::find_by_id(group_id)
             .one(&txn)
             .await
-            .map_err(anyhow::Error::from)?;
+            .map_err(|e| {
+                error!("Failed to check group: {:?}", e);
+                anyhow::Error::from(e)
+            })?;
 
         if group.is_none() {
+            debug!("Creating new group record: {}", group_id);
             let get_group = GetGroup {
                 auth: auth.clone(),
                 group_id: GroupId(group_id),
@@ -92,22 +116,23 @@ pub async fn save_to_db(
             let g = group::get_group(client, url, &get_group).await?;
             let g = g.success().context("Cannot get group info")?;
 
-            // 创建群组记录
             let new_group = groups::ActiveModel {
                 uuid: sea_orm::Set(group_id),
-                group_name: sea_orm::Set(g.group.name), // 使用群组 ID 作为名称
+                group_name: sea_orm::Set(g.group.name),
             };
-            new_group.insert(&txn).await.map_err(anyhow::Error::from)?;
+            new_group.insert(&txn).await.map_err(|e| {
+                error!("Failed to insert group: {:?}", e);
+                anyhow::Error::from(e)
+            })?;
         }
 
-        // 保存消息
-        let r = save_msg(&txn, msg).await;
-        if r.is_err() {
-            dbg!(&r);
+        if let Err(e) = save_msg(&txn, msg).await {
+            warn!("Failed to save message: {:?}", e);
         }
     }
 
     txn.commit().await?;
+    info!("All messages saved to database");
     Ok(())
 }
 
