@@ -3,6 +3,7 @@ use rustls::crypto::aws_lc_rs;
 use server::axum;
 use server::textchat;
 use server::voice_chat;
+use shared::log::init_log;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -10,6 +11,7 @@ async fn main() -> Result<()> {
     aws_lc_rs::default_provider()
         .install_default()
         .expect("unable to set aws_lc_rs as provider");
+    let _g = init_log("server");
     // 启动登录服务器
     tokio::spawn(async {
         if let Err(e) = axum::run_https_server().await {
