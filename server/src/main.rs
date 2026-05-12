@@ -12,7 +12,7 @@ async fn main() -> Result<()> {
     aws_lc_rs::default_provider()
         .install_default()
         .expect("unable to set aws_lc_rs as provider");
-    let _g = init_log("server");
+    let _g = init_log("server", "server");
     info!("Server starting...");
 
     tokio::spawn(async {

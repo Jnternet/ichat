@@ -6,7 +6,7 @@ pub fn main() -> iced::Result {
     aws_lc_rs::default_provider()
         .install_default()
         .expect("unable to set aws_lc_rs as provider");
-    let _g = init_log("client");
+    let _g = init_log("client", "client");
     //启动ui界面
     ui::run()
 }
