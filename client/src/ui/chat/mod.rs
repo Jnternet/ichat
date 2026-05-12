@@ -44,6 +44,9 @@ pub struct Chat {
     show_join_group: bool,
     show_leave_confirm: Option<GroupId>,
     operation_result: Option<Result<String, String>>,
+    // Voice chat states
+    in_voice_chat: bool,
+    voice_chat_error: Option<String>,
 }
 
 pub struct Inner {
@@ -79,6 +82,11 @@ pub enum Message {
     JoinGroupResponse(JoinGroupResponse),
     CreateGroupSubmit,
     CreateGroupResponse(CreateGroupResponse),
+    // Voice chat messages
+    JoinVoiceChat,
+    LeaveVoiceChat,
+    VoiceChatStarted,
+    VoiceChatError(String),
 }
 
 // ── subscription 的 data 类型，实现 Hash 供 run_with 去重 ──────────────────
@@ -264,6 +272,8 @@ impl Chat {
             show_join_group: false,
             show_leave_confirm: None,
             operation_result: None,
+            in_voice_chat: false,
+            voice_chat_error: None,
         };
         let task = chat.load_groups_task();
         (chat, task)
@@ -631,6 +641,37 @@ impl Chat {
                 self.operation_result = None;
                 Action::None
             }
+            // Voice chat handlers
+            Message::JoinVoiceChat => {
+                let Some(inner) = &self.inner else {
+                    return Action::None;
+                };
+                let Some(gid) = self.selected_group else {
+                    return Action::None;
+                };
+                self.in_voice_chat = true;
+                self.voice_chat_error = None;
+                let auth = inner.auth.clone();
+                Action::Run(Task::perform(
+                    async move { voice_chat::start_voice_chat(auth, gid).await },
+                    |result| match result {
+                        Ok(_) => Message::VoiceChatStarted,
+                        Err(e) => Message::VoiceChatError(e.to_string()),
+                    },
+                ))
+            }
+            Message::LeaveVoiceChat => {
+                self.in_voice_chat = false;
+                self.voice_chat_error = None;
+                voice_chat::stop_voice_chat();
+                Action::None
+            }
+            Message::VoiceChatStarted => Action::None,
+            Message::VoiceChatError(e) => {
+                self.in_voice_chat = false;
+                self.voice_chat_error = Some(e);
+                Action::None
+            }
         }
     }
 
@@ -904,6 +945,41 @@ impl Chat {
                 .into();
         }
 
+        let voice_button = button("加入语音通话")
+            .on_press(Message::JoinVoiceChat)
+            .padding(10)
+            .style(|_, _| iced::widget::button::Style {
+                background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.6, 0.8))),
+                text_color: Color::from_rgb(1.0, 1.0, 1.0),
+                ..Default::default()
+            });
+
+        let voice_panel = container(
+            column![
+                text("语音通话中")
+                    .size(18)
+                    .color(Color::from_rgb(0.2, 0.6, 0.8)),
+                button("离开语音通话")
+                    .on_press(Message::LeaveVoiceChat)
+                    .padding(12)
+                    .width(Length::Fill)
+                    .style(|_, _| iced::widget::button::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb(0.8, 0.3, 0.3))),
+                        text_color: Color::from_rgb(1.0, 1.0, 1.0),
+                        ..Default::default()
+                    }),
+            ]
+            .spacing(15)
+            .padding(20)
+            .align_x(iced::alignment::Horizontal::Center),
+        )
+        .width(200)
+        .padding(5)
+        .style(|_| iced::widget::container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb(0.95, 0.97, 0.98))),
+            ..Default::default()
+        });
+
         let mut msg_col = column![].spacing(12).padding(15);
         for msg in &self.messages {
             let bubble = container(text(&msg.content).size(15).line_height(1.5))
@@ -934,7 +1010,10 @@ impl Chat {
         .padding(12)
         .align_y(Alignment::Center);
 
-        column![
+        let chat_content = column![
+            row![voice_button, iced::widget::Space::new().width(Length::Fill)]
+                .padding(10)
+                .align_y(Alignment::Center),
             scrollable(msg_col)
                 .height(Length::Fill)
                 .width(Length::Fill)
@@ -942,8 +1021,17 @@ impl Chat {
             input_row,
         ]
         .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        .height(Length::Fill);
+
+        if self.in_voice_chat {
+            row![chat_content, voice_panel]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .spacing(10)
+                .into()
+        } else {
+            chat_content.into()
+        }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

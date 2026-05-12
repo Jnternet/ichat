@@ -1043,6 +1043,7 @@ dependencies = [
  "dotenv",
  "hex",
  "iced",
+ "lazy_static",
  "reqwest",
  "ringbuf",
  "rustls",
