@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio_rustls::{TlsConnector, TlsStream};
 use uuid::Uuid;
@@ -22,6 +23,7 @@ struct VoiceStreamData {
 }
 
 struct VoiceAudioState {
+    self_id: Option<Uuid>,
     sender_hm: HashMap<Uuid, Sender<Vec<f32>>>,
     receivers: Vec<Receiver<Vec<f32>>>,
     control_tx: Option<Sender<()>>,
@@ -31,11 +33,16 @@ struct VoiceAudioState {
 impl VoiceAudioState {
     fn new() -> Self {
         VoiceAudioState {
+            self_id: None,
             sender_hm: HashMap::new(),
             receivers: Vec::new(),
             control_tx: None,
             is_running: true,
         }
+    }
+
+    fn set_self_id(&mut self, id: Uuid) {
+        self.self_id = Some(id);
     }
 
     fn stop(&mut self) {
@@ -61,6 +68,13 @@ impl VoiceAudioState {
             .unwrap_or_else(|| self.add_sender(id))
     }
 
+    fn should_play(&self, sender_id: Uuid) -> bool {
+        match self.self_id {
+            Some(self_id) => sender_id != self_id,
+            None => true,
+        }
+    }
+
     fn collect_audio(&mut self) -> Vec<Vec<f32>> {
         let mut result = Vec::new();
         self.receivers.retain_mut(|r| {
@@ -75,11 +89,13 @@ impl VoiceAudioState {
 
 lazy_static::lazy_static! {
     static ref VOICE_STREAM: Mutex<Option<VoiceStreamData>> = Mutex::new(None);
-    static ref AUDIO_STATE: Mutex<VoiceAudioState> = Mutex::new(VoiceAudioState::new());
+    static ref AUDIO_STATE: Arc<Mutex<VoiceAudioState>> = Arc::new(Mutex::new(VoiceAudioState::new()));
 }
 
 pub async fn start_voice_chat(auth: Auth, gid: GroupId) -> anyhow::Result<()> {
     let _ = aws_lc_rs::default_provider().install_default();
+
+    let self_id = auth.account_id();
 
     let server_addr = match std::env::var("SERVER_VOICE_CHAT_ADDR") {
         Ok(v) => v,
@@ -120,6 +136,7 @@ pub async fn start_voice_chat(auth: Auth, gid: GroupId) -> anyhow::Result<()> {
         let mut state = AUDIO_STATE.lock().unwrap();
         state.stop();
         *state = VoiceAudioState::new();
+        state.set_self_id(self_id);
     }
 
     let input_stream = match start_input_stream(write_half).await {
@@ -179,9 +196,9 @@ async fn start_output_stream(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Resu
     };
 
     let config = get_audio_config();
-    let state = Arc::new(Mutex::new(VoiceAudioState::new()));
+    let state = Arc::clone(&AUDIO_STATE);
 
-    let (control_tx, mut control_rx) = channel(1);
+    let (control_tx, mut control_rx) = channel::<()>(1);
     {
         let mut s = state.lock().unwrap();
         s.control_tx = Some(control_tx);
@@ -197,11 +214,15 @@ async fn start_output_stream(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Resu
 
         loop {
             tokio::select! {
+                biased;
+
+                _ = control_rx.recv() => {
+                    eprintln!("Received stop signal, exiting read loop");
+                    break;
+                }
                 result = rh.next_item(&mut buf) => {
                     match result {
                         Some(u) => {
-                            eprintln!("Received voice data: {} bytes", u);
-
                             let ar = match rkyv::access::<ArchivedS2C_VC_Msg, rancor::Error>(&buf[..u]) {
                                 Ok(a) => a,
                                 Err(e) => {
@@ -218,15 +239,24 @@ async fn start_output_stream(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Resu
                                 }
                             };
 
-                            let mut state = state_clone.lock().unwrap();
-                            if !state.is_running {
+                            let mut state_guard = state_clone.lock().unwrap();
+                            if !state_guard.is_running {
                                 eprintln!("Audio state not running, stopping read loop");
                                 break;
                             }
 
-                            let sender = state.get_sender(s2c.sender_id);
+                            if !state_guard.should_play(s2c.sender_id) {
+                                continue;
+                            }
+
+                            let sender = state_guard.get_sender(s2c.sender_id);
+                            drop(state_guard);
+
                             if let Err(e) = sender.try_send(s2c.voice_data) {
-                                eprintln!("Failed to send audio data: {}", e);
+                                if matches!(e, TrySendError::Full(_)) {
+                                } else {
+                                    eprintln!("Failed to send audio data: {}", e);
+                                }
                             }
                         }
                         None => {
@@ -234,10 +264,6 @@ async fn start_output_stream(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Resu
                             break;
                         }
                     }
-                }
-                _ = control_rx.recv() => {
-                    eprintln!("Received stop signal, exiting read loop");
-                    break;
                 }
             }
         }
@@ -257,7 +283,7 @@ async fn start_output_stream(rh: ReadHalf<TlsStream<TcpStream>>) -> anyhow::Resu
 
             let audio_data = state.collect_audio();
             for vd in audio_data {
-                data.iter_mut().zip(vd).for_each(|(d, s)| {
+                data.iter_mut().zip(vd.iter()).for_each(|(d, s)| {
                     *d = (s * 2.0).tanh();
                 });
             }
@@ -304,9 +330,15 @@ async fn start_input_stream(
         while let Some(c2s) = rx.recv().await {
             match rkyv::to_bytes::<rancor::Error>(&c2s) {
                 Ok(b) => {
-                    let _ = wh.write_u64(b.len() as u64).await;
-                    let _ = wh.write_all(&b).await;
-                    let _ = wh.flush().await;
+                    if wh.write_u64(b.len() as u64).await.is_err() {
+                        break;
+                    }
+                    if wh.write_all(&b).await.is_err() {
+                        break;
+                    }
+                    if wh.flush().await.is_err() {
+                        break;
+                    }
                 }
                 Err(e) => {
                     eprintln!("Failed to serialize voice data: {}", e);
