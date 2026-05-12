@@ -24,6 +24,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 mod chat_util;
+mod voice_chat;
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
